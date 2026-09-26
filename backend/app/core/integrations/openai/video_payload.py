@@ -35,7 +35,12 @@ def build_create_video_body(input_: VideoGenerationInput) -> dict[str, Any]:
         body["model"] = input_.model
     size = derive_provider_size(provider="openai", model=input_.model, ratio=input_.ratio)
     if size:
-        body["size"] = size
+        # Agnes API rejects WxH format ("720x1280"); expects "720P" or omit entirely.
+        # Since all default mappings are 720p-class, normalize to "720P".
+        if "x" in size:
+            body["size"] = "720P"
+        else:
+            body["size"] = size
     if input_.seconds is not None:
         body["seconds"] = str(int(input_.seconds))
     effective_ratio = resolve_effective_ratio(input_)

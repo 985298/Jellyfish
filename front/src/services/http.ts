@@ -17,7 +17,13 @@ http.interceptors.request.use(
 )
 
 http.interceptors.response.use(
-  (response: AxiosResponse) => response.data,
+  (response: AxiosResponse) => {
+    const body = response.data
+    if (body && typeof body === 'object' && 'code' in body && 'data' in body) {
+      return body.data
+    }
+    return body
+  },
   (error) => {
     // 这里可以统一处理错误提示、跳转登录等
     return Promise.reject(error)

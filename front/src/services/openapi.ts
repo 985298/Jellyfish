@@ -19,8 +19,5 @@ export function initOpenAPI(base: string = '') {
   OpenAPI.BASE = base
 }
 
-const runtimeBackendUrl = window.__ENV?.BACKEND_URL
-const buildtimeBackendUrl = import.meta.env.VITE_BACKEND_URL
-const defaultBackendUrl = 'http://localhost:8000'
-
-initOpenAPI(runtimeBackendUrl ?? buildtimeBackendUrl ?? defaultBackendUrl)
+// Use same-origin (empty BASE) so requests go through the Vite proxy, avoiding CORS.
+initOpenAPI('')

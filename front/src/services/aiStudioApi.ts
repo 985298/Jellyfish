@@ -13,7 +13,7 @@ import type {
 
 const api = {
   projects: {
-    list: () => get<Project[]>('/projects'),
+    list: () => get<{items: Project[], pagination: any}>('/projects').then(res => res.items || res),
     get: (id: string) => get<Project>(`/projects/${id}`),
     create: (data: Partial<Project> & { name: string }) => post<Project>('/projects', data),
     update: (id: string, data: Partial<Project>) => put<Project>(`/projects/${id}`, data),
