@@ -60,7 +60,7 @@ class ActorRead(ActorBase):
 
 
 class CharacterBase(BaseModel):
-    id: str = Field(..., description="角色 ID")
+    id: str | None = Field(None, description="角色 ID（可空，由后端自动生成）")
     project_id: str = Field(..., description="所属项目 ID")
     name: str = Field(..., description="角色名称")
     description: str = Field("", description="角色描述")

@@ -6,8 +6,10 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from pydantic import ValidationError
 
 from app.api.v1 import router as api_v1_router
+from app.api import internal
 from app.bootstrap import bootstrap_all_registries
 from app.config import settings
 from app.schemas.common import ApiResponse
@@ -52,6 +54,17 @@ async def validation_exception_handler(request: Request, exc: Exception) -> JSON
     return JSONResponse(status_code=422, content=body)
 
 
+async def pydantic_validation_exception_handler(request: Request, exc: ValidationError) -> JSONResponse:
+    """Pydantic 校验异常统一为 { code: 422, message, data: null }。
+    用于服务层手动 model_validate 抛出的 ValidationError。
+    """
+    message = _error_message(exc.errors())
+    body = ApiResponse[None](code=422, message=message, data=None, meta=None).model_dump()
+    return JSONResponse(status_code=422, content=body)
+
+
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期：启动时初始化，关闭时清理。"""
@@ -72,6 +85,7 @@ app = FastAPI(
 
 # 统一错误响应格式：{ code, message, data: null }
 app.add_exception_handler(RequestValidationError, validation_exception_handler)
+app.add_exception_handler(ValidationError, pydantic_validation_exception_handler)
 app.add_exception_handler(HTTPException, http_exception_handler)
 app.add_exception_handler(Exception, http_exception_handler)
 
@@ -84,6 +98,7 @@ app.add_middleware(
 )
 
 app.include_router(api_v1_router, prefix=settings.api_v1_prefix)
+app.include_router(internal.router, prefix='/internal')
 # 影视技能路由同时挂到主应用，保证 /api/v1/film 一定可访问
 
 
@@ -92,3 +107,4 @@ async def health():
     """健康检查。"""
     from app.schemas.common import success_response
     return success_response({"status": "ok"})
+

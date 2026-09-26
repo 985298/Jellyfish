@@ -1,6 +1,7 @@
 """Studio 实体主资源 CRUD。"""
 
 from __future__ import annotations
+import logging
 
 from typing import Any
 
@@ -17,7 +18,15 @@ from app.services.studio.entity_thumbnails import resolve_thumbnails
 from app.services.studio.shot_character_links import upsert as upsert_shot_character_link
 from app.utils.project_links import upsert_project_link
 
+import uuid as _uuid
+
+
+def _new_character_id() -> str:
+    """Generate a backend-owned character ID."""
+    return f"char_{_uuid.uuid4().hex[:12]}"
+
 ENTITY_ORDER_FIELDS = {"name", "style", "visual_style", "created_at", "updated_at"}
+logger = logging.getLogger(__name__)
 
 
 def _asset_read_payload(obj: Any, thumbnail: str) -> dict[str, Any]:
@@ -91,6 +100,22 @@ async def create_entity(
     spec = entity_spec(entity_type_norm)
     parsed = spec.create_model.model_validate(body)
     data = parsed.model_dump()
+    id_source = "backend"
+    idempotency_key = "character_id" if entity_type_norm == "character" else "id"
+    if entity_type_norm == "character" and not data.get("id"):
+        data["id"] = _new_character_id()
+        id_source = "backend_generated"
+        idempotency_key = "character_id"
+    logger.info(
+        "create_entity start",
+        extra={
+            "entity_type": entity_type_norm,
+            "entity_id": data.get("id"),
+            "id_source": id_source,
+            "idempotency_key": idempotency_key,
+            "project_id": data.get("project_id"),
+        },
+    )
 
     link_project_id: str | None = None
     link_chapter_id: str | None = None
@@ -106,6 +131,18 @@ async def create_entity(
 
     exists = await db.get(spec.model, data["id"])
     if exists is not None:
+        logger.info(
+            "create_entity idempotent_hit",
+            extra={
+                "entity_type": entity_type_norm,
+                "entity_id": data.get("id"),
+                "id_source": id_source,
+                "idempotency_key": idempotency_key,
+                "project_id": link_project_id,
+                "idempotent_hit": True,
+                "created": False,
+            },
+        )
         raise HTTPException(status_code=400, detail=entity_already_exists(spec.model.__name__))
 
     if entity_type_norm == "character":
@@ -139,6 +176,18 @@ async def create_entity(
     db.add(obj)
     await db.flush()
     await db.refresh(obj)
+    logger.info(
+        "create_entity success",
+        extra={
+            "entity_type": entity_type_norm,
+            "entity_id": obj.id,
+            "id_source": id_source,
+            "idempotency_key": idempotency_key,
+            "project_id": link_project_id,
+            "idempotent_hit": False,
+            "created": True,
+        },
+    )
 
     if entity_type_norm in {"actor", "scene", "prop", "costume"}:
         count = int(getattr(obj, "view_count", 1) or 1)
