@@ -31,7 +31,7 @@ export function DisplayImageCard({
   enablePreview = true,
   size = 'small',
   hoverable = true,
-  imageHeightClassName = 'h-44',
+  imageHeightClassName = 'aspect-video',
 }: DisplayImageCardProps) {
   const [previewOpen, setPreviewOpen] = useState(false)
   const [imgError, setImgError] = useState(false)
@@ -82,4 +82,3 @@ export function DisplayImageCard({
     </>
   )
 }
-

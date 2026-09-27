@@ -858,7 +858,7 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
                       imageAlt={slot.angle}
                       placeholder="暂无图片"
                       hoverable={false}
-                      imageHeightClassName="h-44"
+                      imageHeightClassName="aspect-video"
                       extra={slot.image ? <Tag color="blue">ID {slot.image.id}</Tag> : null}
                       footer={
                         <div className="flex items-center gap-2">
@@ -916,7 +916,7 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
                   imageAlt={candidate.id}
                   placeholder="无缩略图"
                   hoverable={false}
-                  imageHeightClassName="h-44"
+                  imageHeightClassName="aspect-video"
                   footer={
                     <Button
                       className="mt-2"
