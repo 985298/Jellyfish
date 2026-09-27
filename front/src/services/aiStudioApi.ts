@@ -38,7 +38,7 @@ const api = {
   },
   timeline: {
     get: (projectId: string) =>
-      get<TimelineClip[]>(`/projects/${projectId}/timeline`),
+      get<TimelineClip[]>(`/v1/studio/timeline/projects/${projectId}`),
   },
   agents: {
     list: () => get<Agent[]>('/agents'),
