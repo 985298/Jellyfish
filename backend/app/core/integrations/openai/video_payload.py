@@ -54,4 +54,6 @@ def build_create_video_body(input_: VideoGenerationInput) -> dict[str, Any]:
     ref = pick_input_reference(input_)
     if ref:
         body["input_reference"] = ref
+    # Enable audio generation - video model generates synchronized audio
+    body["audio"] = True
     return body
