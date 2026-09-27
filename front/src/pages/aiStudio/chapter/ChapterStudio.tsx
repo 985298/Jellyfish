@@ -545,9 +545,6 @@ const ChapterStudio: React.FC = () => {
   const [dubbedMode, setDubbedMode] = useState(false)
   const [rendering, setRendering] = useState(false)
 
-  const dubbedVideoUrl = dubbedFileId ? buildFileDownloadUrl(dubbedFileId) ?? '' : ''
-  const effectiveVideoUrl = dubbedMode ? dubbedVideoUrl : (currentPreviewVideoUrl || '')
-
   const handleRenderEpisode = async () => {
     if (!chapterId) return
     setRendering(true)
@@ -939,6 +936,9 @@ const ChapterStudio: React.FC = () => {
   )
   const currentPreviewVideoFileId = previewVideoFileId || selectedShot?.generated_video_file_id || null
   const currentPreviewVideoUrl = currentPreviewVideoFileId ? buildFileDownloadUrl(currentPreviewVideoFileId) ?? '' : ''
+
+  const dubbedVideoUrl = dubbedFileId ? buildFileDownloadUrl(dubbedFileId) ?? '' : ''
+  const effectiveVideoUrl = dubbedMode ? dubbedVideoUrl : (currentPreviewVideoUrl || '')
 
   useEffect(() => {
     // 切换分镜时：主预览区视频跟随分镜（清空手动选择的预览视频）
