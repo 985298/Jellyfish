@@ -1,6 +1,7 @@
 """镜头提取候选项服务。"""
 
 from __future__ import annotations
+import json
 
 from datetime import datetime, timezone
 from typing import Any
@@ -292,6 +293,18 @@ async def mark_linked(
     row.linked_entity_id = linked_entity_id
     row.confirmed_at = _utc_now()
     await _flush_refresh_candidate(db, row)
+    # Auto-fill character description from candidate payload if empty
+    if row.candidate_type == ShotCandidateType.character:
+        try:
+            payload = json.loads(row.payload) if isinstance(row.payload, str) else (row.payload or {})
+            desc = (payload.get("description") or "").strip()
+        except Exception:
+            desc = ""
+        if desc:
+            from app.models.studio import Character
+            char = await db.get(Character, linked_entity_id)
+            if char is not None and not (char.description or "").strip():
+                char.description = desc
     await recompute_shot_status(db, shot_id=row.shot_id)
     return row
 

@@ -49,6 +49,8 @@ from app.services.studio.image_task_runner import create_image_task_and_link as 
 
 router = APIRouter()
 
+_CHARACTER_NEGATIVE_PROMPT = "五官不一致，变脸，不同人物，肢体扭曲，裁切，特写错位，多余人物，场景环境，强烈阴影，文字，水印，透视，畸形手脚，服装错乱，模糊，低画质，动漫，二次元，3D渲染，卡通，手绘"
+
 
 class StudioImageTaskRequest(BaseModel):
     """Studio 专用图片任务请求体：可选模型 ID，不传则用默认图片模型；供应商由模型反查。
@@ -332,6 +334,8 @@ async def create_character_image_generation_task(
         relation_entity_id=submission.relation_entity_id,
         prompt=submission.prompt,
         images=ref_images if ref_images else None,
+        size="2048x1152",
+        negative_prompt=_CHARACTER_NEGATIVE_PROMPT,
     )
     return created_response(TaskCreated(task_id=task_id))
 

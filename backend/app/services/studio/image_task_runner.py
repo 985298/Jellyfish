@@ -250,6 +250,8 @@ async def create_image_task_and_link(
     resolution_profile: str | None = None,
     purpose: str = "generic",
     render_context: dict | None = None,
+    size: str | None = None,
+    negative_prompt: str | None = None,
 ) -> str:
     """创建图片生成任务，并建立任务关联。"""
     store = SqlAlchemyTaskStore(db)
@@ -274,6 +276,10 @@ async def create_image_task_and_link(
     }
     if images:
         run_args["input"]["images"] = images
+    if size:
+        run_args["input"]["size"] = size
+    if negative_prompt:
+        run_args["input"]["negative_prompt"] = negative_prompt
     if render_context:
         run_args["render_context"] = render_context
 

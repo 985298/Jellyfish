@@ -64,6 +64,8 @@ class OpenAIImageApiAdapter:
                     body["size"] = resolved_input.size
                 if resolved_input.watermark is not None:
                     body["watermark"] = bool(resolved_input.watermark)
+                if resolved_input.negative_prompt:
+                    body["negative_prompt"] = resolved_input.negative_prompt
 
                 body["images"] = [
                     {
@@ -95,6 +97,8 @@ class OpenAIImageApiAdapter:
                     body["size"] = resolved_input.size
                 if resolved_input.watermark is not None:
                     body["watermark"] = bool(resolved_input.watermark)
+                if resolved_input.negative_prompt:
+                    body["negative_prompt"] = resolved_input.negative_prompt
 
                 url = f"{base_url}/images/generations"
                 t0 = time.perf_counter()
