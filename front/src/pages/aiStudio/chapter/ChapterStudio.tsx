@@ -2526,7 +2526,7 @@ const ChapterStudio: React.FC = () => {
                     ref={videoRef}
                     className="w-full h-full object-contain"
                     controls={false}
-                    muted={!dubbedMode}
+                    muted={false}
                     playsInline
                     preload="metadata"
                     src={effectiveVideoUrl || undefined}
