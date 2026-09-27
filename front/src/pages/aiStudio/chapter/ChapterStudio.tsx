@@ -541,6 +541,34 @@ const ChapterStudio: React.FC = () => {
   const [isPlaying, setIsPlaying] = useState(false)
   const [videoDuration, setVideoDuration] = useState(0)
   const [videoTime, setVideoTime] = useState(0)
+  const [dubbedFileId, setDubbedFileId] = useState<string | null>(null)
+  const [dubbedMode, setDubbedMode] = useState(false)
+  const [rendering, setRendering] = useState(false)
+
+  const dubbedVideoUrl = dubbedFileId ? buildFileDownloadUrl(dubbedFileId) ?? '' : ''
+  const effectiveVideoUrl = dubbedMode ? dubbedVideoUrl : (currentPreviewVideoUrl || '')
+
+  const handleRenderEpisode = async () => {
+    if (!chapterId) return
+    setRendering(true)
+    try {
+      const resp = await fetch(`/api/v1/film/chapters/${chapterId}/render`, { method: 'POST' })
+      const data = await resp.json()
+      if (data.final_file_id) {
+        setDubbedFileId(data.final_file_id)
+        setDubbedMode(true)
+        message.success('渲染成功，已切换到成片播放')
+      } else if (data.upload_error) {
+        message.warning('渲染完成但上传失败: ' + data.upload_error)
+      } else {
+        message.warning('渲染完成但未找到成片')
+      }
+    } catch {
+      message.error('渲染失败，请稍后重试')
+    } finally {
+      setRendering(false)
+    }
+  }
 
   const [filter, setFilter] = useState<ShotFilter>('all')
   const [editingTitleId, setEditingTitleId] = useState<string | null>(null)
@@ -2498,10 +2526,10 @@ const ChapterStudio: React.FC = () => {
                     ref={videoRef}
                     className="w-full h-full object-contain"
                     controls={false}
-                    muted
+                    muted={!dubbedMode}
                     playsInline
                     preload="metadata"
-                    src={currentPreviewVideoUrl || undefined}
+                    src={effectiveVideoUrl || undefined}
                   />
                   {!selectedShot && (
                     <div className="absolute inset-0 flex items-center justify-center text-gray-400">
@@ -2544,6 +2572,24 @@ const ChapterStudio: React.FC = () => {
                     icon={<CaretRightOutlined />}
                     onClick={() => message.info('帧进（Mock）')}
                   />
+                  {dubbedFileId && (
+                    <Segmented
+                      size="small"
+                      value={dubbedMode ? 'dubbed' : 'original'}
+                      onChange={(v) => setDubbedMode(v === 'dubbed')}
+                      options={[
+                        { label: '原视频', value: 'original' },
+                        { label: '成片', value: 'dubbed' },
+                      ]}
+                    />
+                  )}
+                  <Button
+                    size="small"
+                    loading={rendering}
+                    onClick={() => void handleRenderEpisode()}
+                  >
+                    {dubbedFileId ? '重新渲染' : '渲染成片'}
+                  </Button>
                   <div className="flex-1 min-w-0">
                     <Slider
                       tooltip={{ formatter: null }}
