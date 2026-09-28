@@ -30,6 +30,7 @@ export default function ChapterPipeline() {
   ])
   const [chapterTitle, setChapterTitle] = useState('')
   const [scriptText, setScriptText] = useState('')
+  const [divideResult, setDivideResult] = useState<any>(null)
 
   const loadStatus = useCallback(async () => {
     if (!chapterId) return
@@ -88,7 +89,8 @@ export default function ChapterPipeline() {
       })
       const tid = res.data?.task_id
       if (!tid) throw new Error('No task_id')
-      await pollTask(tid)
+      const result = await pollTask(tid)
+      setDivideResult(result)
       updateStage('divide', 'done')
       message.success({ content: '分镜完成', key: 'pipe' })
       await loadStatus()
@@ -106,21 +108,26 @@ export default function ChapterPipeline() {
     updateStage('extract', 'running')
     try {
       message.loading({ content: '元素提取中...', key: 'pipe', duration: 0 })
-      // Get shots first
-      const shotsRes = await fetch(`${API_BASE}/shots?chapter_id=${chapterId}&page=1&page_size=100`)
-      const shotsData = (await shotsRes.json())?.data
-      const shots = shotsData?.items || []
-      if (!shots.length) throw new Error('No shots found')
-      // Extract for each shot (use first shot's division)
-      const divideRes = await fetch(`${API_BASE}/chapters/${chapterId}/shots`)
-      // Actually, extract needs script_division - get from divide task result
-      // For simplicity, extract from the first shot's data
-      const firstShot = shots[0]
+      // Get division result - either from state or fetch from backend
+      let division = divideResult
+      if (!division) {
+        // Fetch latest divide task result from backend
+        const tasksRes = await fetch(`/api/v1/film/tasks?task_kind=script_divide&page=1&page_size=1`)
+        const tasksData = (await tasksRes.json())?.data
+        const tasks = tasksData?.items || []
+        const succeededTask = tasks.find((t: any) => t.status === 'succeeded')
+        if (succeededTask) {
+          const resultRes = await fetch(`/api/v1/film/tasks/${succeededTask.id}/result`)
+          division = (await resultRes.json())?.data
+        }
+      }
+      if (!division) throw new Error('No division result found - run divide first')
+      const divisionData = division?.result || division
       const extractRes = await ScriptProcessingService.extractScriptAsyncApiV1ScriptProcessingExtractAsyncPost({
         requestBody: {
           project_id: projectId,
           chapter_id: chapterId,
-          script_division: { shots: shots.map((s: any) => ({ index: s.index, start_line: 1, end_line: 1, script_excerpt: s.script_excerpt || '', shot_name: s.title || '' })) },
+          script_division: divisionData,
           consistency: null,
         },
       })
