@@ -12,6 +12,7 @@ from app.api.v1 import router as api_v1_router
 from app.api import internal
 from app.bootstrap import bootstrap_all_registries
 from app.config import settings
+from app.core.storage import init_storage
 from app.schemas.common import ApiResponse
 
 
@@ -70,6 +71,11 @@ async def lifespan(app: FastAPI):
     """应用生命周期：启动时初始化，关闭时清理。"""
     # 启动时：供应商注册 + 任务执行器注册（幂等）
     bootstrap_all_registries()
+    # 初始化对象存储（创建 S3 bucket，幂等）
+    try:
+        init_storage()
+    except Exception as e:
+        print(f"[startup] S3 init warning: {e}")
     yield
     # 关闭时：清理资源
     pass
