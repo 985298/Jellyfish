@@ -1064,7 +1064,7 @@ export function ChapterShotEditPage() {
                 const createBody: any = { project_id: projectId, name }
                 if (asset.description) createBody.description = asset.description
                 if (asset.kind !== 'actor') {
-                  createBody.style = projectStyle || 'real_people_city'
+                  createBody.style = projectStyle || '真人都市'
                   createBody.view_count = 1
                 }
                 message.loading({ content: '正在创建...', key: 'newAsset', duration: 0 })
