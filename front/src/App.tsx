@@ -6,6 +6,7 @@ import NotFound from './pages/NotFound'
 import ProjectLobby from './pages/aiStudio/project/ProjectLobby'
 import ProjectWorkbench from './pages/aiStudio/project/ProjectWorkbench'
 import RoleDetailPage from './pages/aiStudio/project/ProjectWorkbench/RoleDetailPage'
+import ChapterPipeline from './pages/aiStudio/chapter/ChapterPipeline'
 import ChapterStudio from './pages/aiStudio/chapter/ChapterStudio'
 import AssetManager from './pages/aiStudio/assets/AssetManager'
 import ActorAssetEditPage from './pages/aiStudio/assets/ActorAssetEditPage.tsx'
@@ -33,6 +34,7 @@ const App: React.FC = () => {
           <Route path="projects/:projectId/roles/:characterId/edit" element={<RoleDetailPage />} />
           <Route path="projects/:projectId/chapters/:chapterId/prep/*" element={<Navigate to="../shots" replace />} />
           <Route path="projects/:projectId/chapters/:chapterId/studio" element={<ChapterStudio />} />
+          <Route path="projects/:projectId/chapters/:chapterId/pipeline" element={<ChapterPipeline />} />
           <Route path="projects/:projectId/chapters/:chapterId/shots/:shotId/edit" element={<ChapterShotEditPage />} />
           <Route path="projects/:projectId/chapters/:chapterId/shots" element={<ChapterShotsPage />} />
           <Route path="projects/:projectId/chapters/:chapterId/prep-drafts" element={<Navigate to="../shots" replace />} />
