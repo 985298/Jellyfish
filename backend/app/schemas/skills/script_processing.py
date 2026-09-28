@@ -305,7 +305,7 @@ class StudioAssetDraft(BaseModel):
     description: str = Field("", description="描述")
     tags: List[str] = Field(default_factory=list, description="标签")
     prompt_template_id: Optional[str] = Field(None, description="提示词模板 ID（可空）")
-    view_count: int = Field(1, ge=1, description="计划生成视角图数量")
+    view_count: int = Field(1, ge=0, description="计划生成视角图数量")
 
 
 class StudioCharacterDraft(BaseModel):

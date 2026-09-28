@@ -1063,6 +1063,10 @@ export function ChapterShotEditPage() {
                 const entityType = asset.kind === 'actor' ? 'character' : asset.kind
                 const createBody: any = { project_id: projectId, name }
                 if (asset.description) createBody.description = asset.description
+                if (asset.kind !== 'actor') {
+                  createBody.style = projectStyle || 'real_people_city'
+                  createBody.view_count = 1
+                }
                 message.loading({ content: '正在创建...', key: 'newAsset', duration: 0 })
                 const createRes = await StudioEntitiesService.createEntityApiV1StudioEntitiesEntityTypePost({
                   entityType,
@@ -1106,7 +1110,7 @@ export function ChapterShotEditPage() {
         message.error('existence-check 调用失败')
       }
     },
-    [openLinkingModal, chapterId, projectId, shotId, applyPreparationState, loadPreparationState],
+    [openLinkingModal, chapterId, projectId, shotId, projectStyle, applyPreparationState, loadPreparationState],
   )
 
   const ignoreCandidate = useCallback(
