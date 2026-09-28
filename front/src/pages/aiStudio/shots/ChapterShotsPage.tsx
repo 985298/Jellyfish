@@ -25,6 +25,7 @@ import {
   EditOutlined,
   FileSearchOutlined,
   PlusOutlined,
+  ThunderboltOutlined,
   ReloadOutlined,
   ScissorOutlined,
   VideoCameraOutlined,
