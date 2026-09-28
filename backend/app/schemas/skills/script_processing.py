@@ -519,3 +519,39 @@ __all__ = [
     "TableData",
     "OutputCompileResult",
 ]
+
+
+# === Phase 1: Decoupled schemas ===
+
+
+class AssetExtractionResult(BaseModel):
+    """Project-level asset extraction result (no shots)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    project_id: str = Field(..., description="Project ID")
+    characters: List[StudioCharacterDraft] = Field(default_factory=list)
+    scenes: List[StudioAssetDraft] = Field(default_factory=list)
+    props: List[StudioAssetDraft] = Field(default_factory=list)
+    costumes: List[StudioAssetDraft] = Field(default_factory=list)
+
+
+class ShotBindingDraft(BaseModel):
+    """Per-shot asset binding (name-based references)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    index: int = Field(..., ge=1)
+    scene_name: Optional[str] = Field(None)
+    character_names: List[str] = Field(default_factory=list)
+    prop_names: List[str] = Field(default_factory=list)
+    costume_names: List[str] = Field(default_factory=list)
+
+
+class ShotBindingResult(BaseModel):
+    """Shot-level asset binding result."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    chapter_id: str = Field(...)
+    shots: List[ShotBindingDraft] = Field(default_factory=list)

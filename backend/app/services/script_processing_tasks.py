@@ -46,6 +46,8 @@ SCRIPT_SCENE_INFO_TASK_KIND = "script_scene_info"
 SCRIPT_COSTUME_INFO_TASK_KIND = "script_costume_info"
 SCRIPT_OPTIMIZE_TASK_KIND = "script_optimize"
 SCRIPT_SIMPLIFY_TASK_KIND = "script_simplify"
+SCRIPT_ASSET_EXTRACT_TASK_KIND = "script_asset_extract"
+SCRIPT_ASSET_BIND_TASK_KIND = "script_asset_bind"
 _ACTIVE_TASK_STATUSES = (
     GenerationTaskStatus.pending,
     GenerationTaskStatus.running,
@@ -772,4 +774,82 @@ def spawn_script_optimization_task(task_id: str) -> None:
 def spawn_script_simplification_task(task_id: str) -> None:
     from app.tasks.execute_task import enqueue_task_execution
 
+    enqueue_task_execution(task_id)
+
+
+# === Phase 3: Asset extraction + binding tasks ===
+
+async def create_asset_extract_task(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    script_text: str,
+) -> AsyncTaskCreateResult:
+    store = SqlAlchemyTaskStore(db)
+    tm = TaskManager(store=store, strategies={})
+    run_args = {
+        "project_id": project_id,
+        "script_text": script_text,
+    }
+    task_record = await tm.create(
+        task=_CreateOnlyTask(),
+        mode=DeliveryMode.async_polling,
+        task_kind=SCRIPT_ASSET_EXTRACT_TASK_KIND,
+        run_args=run_args,
+    )
+    await store.link_task(
+        task_id=task_record.id,
+        relation_type="asset_extraction",
+        relation_entity_id=project_id,
+    )
+    return AsyncTaskCreateResult(
+        task_id=task_record.id,
+        status=TaskStatus.created,
+        reused=False,
+        relation_type="asset_extraction",
+        relation_entity_id=project_id,
+    )
+
+
+async def create_asset_bind_task(
+    db: AsyncSession,
+    *,
+    chapter_id: str,
+    script_division_json: str,
+    asset_list_json: str,
+) -> AsyncTaskCreateResult:
+    store = SqlAlchemyTaskStore(db)
+    tm = TaskManager(store=store, strategies={})
+    run_args = {
+        "chapter_id": chapter_id,
+        "script_division_json": script_division_json,
+        "asset_list_json": asset_list_json,
+    }
+    task_record = await tm.create(
+        task=_CreateOnlyTask(),
+        mode=DeliveryMode.async_polling,
+        task_kind=SCRIPT_ASSET_BIND_TASK_KIND,
+        run_args=run_args,
+    )
+    await store.link_task(
+        task_id=task_record.id,
+        relation_type="asset_binding",
+        relation_entity_id=chapter_id,
+    )
+    return AsyncTaskCreateResult(
+        task_id=task_record.id,
+        status=TaskStatus.created,
+        reused=False,
+        relation_type="asset_binding",
+        relation_entity_id=chapter_id,
+    )
+
+
+def spawn_asset_extract_task(task_id: str) -> None:
+    from app.tasks.execute_task import enqueue_task_execution
+    enqueue_task_execution(task_id)
+
+
+def spawn_asset_bind_task(task_id: str) -> None:
+    from app.tasks.execute_task import enqueue_task_execution
     enqueue_task_execution(task_id)

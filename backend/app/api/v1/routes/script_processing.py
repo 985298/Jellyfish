@@ -41,6 +41,10 @@ from app.schemas.skills.prop_info_analysis import PropInfoAnalysisResult
 from app.schemas.skills.scene_info_analysis import SceneInfoAnalysisResult
 from app.services.common import required_field
 from app.services.script_processing_tasks import (
+    create_asset_extract_task,
+    spawn_asset_extract_task,
+    create_asset_bind_task,
+    spawn_asset_bind_task,
     create_consistency_task,
     create_costume_info_task,
     create_divide_task,
@@ -1039,3 +1043,80 @@ async def extract_script(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to extract script: {str(e)}",
         )
+
+
+
+# === Phase 3: Decoupled asset extraction + binding endpoints ===
+
+
+class ScriptAssetExtractRequest(BaseModel):
+    """Phase 3: request body for asset-only extraction (no division needed)."""
+    project_id: str = Field(..., description="Project ID", min_length=1)
+    script_text: str = Field(..., description="Full script text", min_length=1)
+
+
+class ScriptAssetBindRequest(BaseModel):
+    """Phase 3: request body for asset-to-shot binding."""
+    chapter_id: str = Field(..., description="Chapter ID", min_length=1)
+    script_division: dict[str, Any] = Field(..., description="Division result (ScriptDivisionResult)")
+    asset_list: dict[str, Any] = Field(..., description="Existing assets: {characters: [...], scenes: [...], props: [...], costumes: [...]}")
+
+
+@router.post(
+    "/asset-extract-async",
+    response_model=ApiResponse[AsyncTaskCreateRead],
+    summary="Phase 3: Extract project-level assets from script text (no division needed)",
+    description="Analyze script text and extract all characters/scenes/props/costumes as project-level entities. Does NOT create shots or bindings.",
+)
+async def asset_extract_async(
+    request: ScriptAssetExtractRequest,
+    db: AsyncSession = Depends(get_db),
+) -> ApiResponse[AsyncTaskCreateRead]:
+    task_info = await create_asset_extract_task(
+        db,
+        project_id=request.project_id,
+        script_text=request.script_text,
+    )
+    await db.commit()
+    if not task_info.reused:
+        spawn_asset_extract_task(task_info.task_id)
+    return success_response(
+        AsyncTaskCreateRead(
+            task_id=task_info.task_id,
+            status=task_info.status,
+            reused=task_info.reused,
+            relation_type=task_info.relation_type,
+            relation_entity_id=task_info.relation_entity_id,
+        )
+    )
+
+
+@router.post(
+    "/bind-assets-async",
+    response_model=ApiResponse[AsyncTaskCreateRead],
+    summary="Phase 3: Bind existing assets to shots",
+    description="Given division result + existing asset list, LLM assigns assets to each shot. Does NOT create new assets.",
+)
+async def bind_assets_async(
+    request: ScriptAssetBindRequest,
+    db: AsyncSession = Depends(get_db),
+) -> ApiResponse[AsyncTaskCreateRead]:
+    import json
+    task_info = await create_asset_bind_task(
+        db,
+        chapter_id=request.chapter_id,
+        script_division_json=json.dumps(request.script_division, ensure_ascii=False),
+        asset_list_json=json.dumps(request.asset_list, ensure_ascii=False),
+    )
+    await db.commit()
+    if not task_info.reused:
+        spawn_asset_bind_task(task_info.task_id)
+    return success_response(
+        AsyncTaskCreateRead(
+            task_id=task_info.task_id,
+            status=task_info.status,
+            reused=task_info.reused,
+            relation_type=task_info.relation_type,
+            relation_entity_id=task_info.relation_entity_id,
+        )
+    )

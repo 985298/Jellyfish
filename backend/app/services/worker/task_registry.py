@@ -11,6 +11,8 @@ from __future__ import annotations
 from app.services.film.generated_video import run_video_generation_task
 from app.services.film.shot_frame_prompt_tasks import run_shot_frame_prompt_task
 from app.services.script_processing_worker import (
+    AssetExtractTaskExecutor,
+    AssetBindTaskExecutor,
     CharacterPortraitTaskExecutor,
     ConsistencyTaskExecutor,
     CostumeInfoTaskExecutor,
@@ -43,6 +45,8 @@ task_executor_registry = TaskExecutorRegistry()
 
 task_executor_registry.register("script_divide", DivideTaskExecutor())
 task_executor_registry.register("script_extract", ExtractTaskExecutor())
+task_executor_registry.register("script_asset_extract", AssetExtractTaskExecutor())
+task_executor_registry.register("script_asset_bind", AssetBindTaskExecutor())
 task_executor_registry.register("script_consistency", ConsistencyTaskExecutor())
 task_executor_registry.register("script_character_portrait", CharacterPortraitTaskExecutor())
 task_executor_registry.register("script_prop_info", PropInfoTaskExecutor())
