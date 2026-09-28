@@ -35,7 +35,7 @@ import {
   VideoCameraOutlined,
 } from '@ant-design/icons'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { StudioChaptersService } from '../../../services/generated'
+import { StudioChaptersService, ScriptProcessingService, FilmService } from '../../../services/generated'
 import type { ChapterRead } from '../../../services/generated'
 import type { Chapter } from '../../../mocks/data'
 import { ChapterRawTextEditorModal } from './components/ChapterRawTextEditorModal'
@@ -316,15 +316,92 @@ const ChapterPrep: React.FC = () => {
 
   // TODO: 后续可在此接入“章节草稿/版本历史”接口，替换掉当前预置数据与本地状态实现。
 
+  const pollTask = async (taskId: string): Promise<any> => {
+    for (let i = 0; i < 100; i++) {
+      await new Promise((r) => setTimeout(r, 3000))
+      const res = await FilmService.getTaskStatusApiV1FilmTasksTaskIdStatusGet({ taskId })
+      const st = res.data?.status
+      if (st === 'succeeded') {
+        const resultRes = await FilmService.getTaskResultApiV1FilmTasksTaskIdResultGet({ taskId })
+        return resultRes.data
+      }
+      if (st === 'failed' || st === 'error' || st === 'cancelled') {
+        throw new Error(String(res.data?.error || `Task ${st}`))
+      }
+    }
+    throw new Error('Task timeout (5min)')
+  }
+
   const runExtract = async (kind: 'all' | ExtractKind) => {
     if (!rawText.trim()) {
       message.warning('请先粘贴或输入原文')
       return
     }
+    if (!chapterId || !projectId) {
+      message.error('缺少章节或项目ID')
+      return
+    }
     setExtracting(true)
     try {
-      await new Promise((r) => setTimeout(r, 900))
-      const next = extractMock(rawText)
+      message.loading({ content: '正在分镜提取...', key: 'extract', duration: 0 })
+      const divideRes = await ScriptProcessingService.divideScriptAsyncApiV1ScriptProcessingDivideAsyncPost({
+        requestBody: { script_text: rawText, write_to_db: true, chapter_id: chapterId },
+      })
+      const divideTaskId = divideRes.data?.task_id
+      if (!divideTaskId) throw new Error('分镜任务创建失败')
+      const divideData = await pollTask(divideTaskId)
+      const divideResult = divideData?.result || divideData || {}
+      const shots = divideResult?.shots || []
+      const storyboards: StoryboardSuggestion[] = shots.map((s: any, i: number) => ({
+        id: `sb-${i + 1}`,
+        index: s.index || i + 1,
+        title: s.shot_name || `镜头 ${i + 1}`,
+        preview: String(s.script_excerpt || '').slice(0, 80),
+        paragraphRange: `第${s.start_line || 1}–${s.end_line || 1}行`,
+        duration: '5–10秒',
+        actions: [],
+        roles: [],
+      }))
+
+      message.loading({ content: '正在提取角色/场景/道具...', key: 'extract', duration: 0 })
+      const extractRes = await ScriptProcessingService.extractScriptAsyncApiV1ScriptProcessingExtractAsyncPost({
+        requestBody: {
+          project_id: projectId,
+          chapter_id: chapterId,
+          script_division: divideResult,
+          consistency: null,
+        },
+      })
+      const extractTaskId = extractRes.data?.task_id
+      if (!extractTaskId) throw new Error('提取任务创建失败')
+      const extractData = await pollTask(extractTaskId)
+      const draft = extractData?.result?.draft || extractData?.draft || extractData?.result || {}
+
+      const roles: RoleItem[] = (draft.characters || []).map((c: any, i: number) => ({
+        id: c.id || `role-${i + 1}`,
+        name: c.name || `角色${i + 1}`,
+        aliases: c.aliases || [],
+        firstSeen: c.first_seen || '',
+        description: c.appearance || c.description || '',
+        primary: i === 0,
+      }))
+      const scenes: SceneItem[] = (draft.scenes || []).map((s: any, i: number) => ({
+        id: s.id || `scene-${i + 1}`,
+        name: s.name || `场景${i + 1}`,
+        indoorOutdoor: '未知',
+        time: '未知',
+        keywords: [],
+      }))
+      const props: PropItem[] = (draft.props || []).map((p: any, i: number) => ({
+        id: p.id || `prop-${i + 1}`,
+        name: p.name || `道具${i + 1}`,
+        owner: p.owner,
+        count: 1,
+        key: false,
+      }))
+
+      message.success({ content: '提取完成', key: 'extract' })
+      const next: ExtractResults = { storyboards, roles, scenes, props }
       setResults((prev) => {
         if (kind === 'all') return next
         switch (kind) {
@@ -340,9 +417,7 @@ const ChapterPrep: React.FC = () => {
             return prev
         }
       })
-      message.success('提取完成（Mock）')
 
-      // 打开提取回显浮窗
       if (kind === 'roles' || kind === 'scenes' || kind === 'props') {
         setExtractReviewTab(kind)
       } else {
@@ -350,10 +425,13 @@ const ChapterPrep: React.FC = () => {
       }
       setSelectedEntityKeys({ roles: [], scenes: [], props: [] })
       setExtractReviewOpen(true)
+    } catch (e: any) {
+      message.error({ content: e?.message || '提取失败，请重试', key: 'extract' })
     } finally {
       setExtracting(false)
     }
   }
+
 
   const existingSet = useMemo(() => {
     return {
