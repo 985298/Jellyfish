@@ -1055,32 +1055,38 @@ export function ChapterShotEditPage() {
 
         if (!item.exists) {
           Modal.confirm({
-            title: '当前无可关联资产，是否新建？',
-            okText: '新建',
+            title: `是否新建${asset.kind === 'actor' ? '角色' : asset.kind === 'scene' ? '场景' : asset.kind === 'prop' ? '道具' : '服装'}「${name}」并关联到当前镜头？`,
+            okText: '新建并关联',
             cancelText: '取消',
-            onOk: () => {
-              pendingExternalAssetCreateRef.current = true
-              const open = (url: string) => window.open(url, '_blank', 'noopener,noreferrer')
-              const descQ = asset.description?.trim()
-                ? `&desc=${encodeURIComponent(asset.description.trim())}`
-                : ''
-              const styleQ =
-                `&visualStyle=${encodeURIComponent(projectVisualStyle)}` +
-                `&style=${encodeURIComponent(projectStyle)}`
-              const ctxQ =
-                `&projectId=${encodeURIComponent(projectId)}` +
-                `&chapterId=${encodeURIComponent(chapterId)}` +
-                `&shotId=${encodeURIComponent(shotId)}` +
-                styleQ
-              if (asset.kind === 'scene' || asset.kind === 'prop' || asset.kind === 'costume') {
-                open(
-                  `/assets?tab=${asset.kind}&create=1&name=${encodeURIComponent(name)}${descQ}${ctxQ}`,
-                )
-                return
+            onOk: async () => {
+              try {
+                const entityType = asset.kind === 'actor' ? 'character' : asset.kind
+                const createBody: any = { project_id: projectId, name }
+                if (asset.description) createBody.description = asset.description
+                message.loading({ content: '正在创建...', key: 'newAsset', duration: 0 })
+                const createRes = await StudioEntitiesService.createEntityApiV1StudioEntitiesEntityTypePost({
+                  entityType,
+                  requestBody: createBody,
+                })
+                const entityId = createRes.data?.id
+                if (!entityId) throw new Error('创建失败：未返回实体ID')
+                if (asset.candidateId) {
+                  const linkRes = await StudioShotsService.linkExtractedCandidateApiV1StudioShotsExtractedCandidatesCandidateIdLinkPatch({
+                    candidateId: asset.candidateId,
+                    requestBody: { linked_entity_id: String(entityId) },
+                  })
+                  if (linkRes.data?.state) {
+                    applyPreparationState(linkRes.data.state)
+                  } else {
+                    await loadPreparationState({ silent: true })
+                  }
+                } else {
+                  await loadPreparationState({ silent: true })
+                }
+                message.success({ content: '已创建并关联', key: 'newAsset' })
+              } catch (e: any) {
+                message.error({ content: e?.message || '创建实体失败', key: 'newAsset' })
               }
-              open(
-                `/projects/${encodeURIComponent(projectId)}?tab=roles&create=1&name=${encodeURIComponent(name)}${descQ}${ctxQ}`,
-              )
             },
           })
           return
@@ -1100,7 +1106,7 @@ export function ChapterShotEditPage() {
         message.error('existence-check 调用失败')
       }
     },
-    [openLinkingModal, chapterId, projectId, projectStyle, projectVisualStyle, shotId],
+    [openLinkingModal, chapterId, projectId, shotId, applyPreparationState, loadPreparationState],
   )
 
   const ignoreCandidate = useCallback(
