@@ -4,14 +4,14 @@ from __future__ import annotations
 
 from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.dependencies import get_db
 from app.models.studio_shots import Shot, ShotExtractedCandidate, ShotCandidateStatus
 from app.models.studio_assets import Character, Scene, Prop, Costume
-from app.models.studio_projects import ProjectSceneLink, ProjectPropLink, ProjectCostumeLink
+from app.models.studio_projects import Chapter, ProjectSceneLink, ProjectPropLink, ProjectCostumeLink
 from app.models.studio_shots import ShotCharacterLink
 from app.schemas.common import ApiResponse, success_response
 from app.services.studio.entity_crud import create_entity as _create_entity_crud
@@ -30,6 +30,11 @@ ENTITY_MAP = {
 @router.get("/chapters/{chapter_id}/pipeline-status", response_model=ApiResponse[dict])
 async def get_pipeline_status(chapter_id: str, db: AsyncSession = Depends(get_db)):
     """Check completion status of all pipeline stages for a chapter."""
+    chapter = (await db.execute(
+        select(Chapter).where(Chapter.id == chapter_id)
+    )).scalars().first()
+    project_id = str(chapter.project_id) if chapter else ""
+
     shots = (await db.execute(
         select(Shot).where(Shot.chapter_id == chapter_id).order_by(Shot.index)
     )).scalars().all()
@@ -37,9 +42,9 @@ async def get_pipeline_status(chapter_id: str, db: AsyncSession = Depends(get_db
 
     if not shot_ids:
         return success_response({
+            "stage_asset_extract": "not_started",
             "stage_divide": "not_started",
-            "stage_extract": "not_started",
-            "stage_confirm": "not_started",
+            "stage_bind": "not_started",
             "stage_asset_images": "not_started",
             "stage_keyframes": "not_started",
             "stage_videos": "not_started",
@@ -52,16 +57,26 @@ async def get_pipeline_status(chapter_id: str, db: AsyncSession = Depends(get_db
     pending = [c for c in cands if c.candidate_status == ShotCandidateStatus.pending]
     linked = [c for c in cands if c.candidate_status == ShotCandidateStatus.linked]
 
-    chars = (await db.execute(select(Character).where(Character.project_id == shots[0].chapter_id if shots else ""))).scalars().all()
+    char_count = (await db.execute(
+        select(func.count(Character.id)).where(Character.project_id == project_id)
+    )).scalar() or 0
+
+    bind_count = (await db.execute(
+        select(func.count(ShotCharacterLink.id)).where(ShotCharacterLink.shot_id.in_(shot_ids))
+    )).scalar() or 0
 
     return success_response({
+        "stage_asset_extract": "done" if char_count > 0 else "not_started",
         "stage_divide": "done" if shots else "not_started",
+        "stage_bind": "done" if bind_count > 0 else ("not_started" if shots else "blocked"),
         "stage_extract": "done" if cands else ("not_started" if shots else "blocked"),
         "stage_confirm": "done" if cands and not pending else ("partial" if linked else "not_started"),
         "pending_count": len(pending),
         "linked_count": len(linked),
         "shots_count": len(shots),
         "candidates_count": len(cands),
+        "asset_count": char_count,
+        "bind_count": bind_count,
     })
 
 

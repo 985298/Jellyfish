@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 from dataclasses import dataclass
+from datetime import datetime, timezone
 
 from fastapi import HTTPException
 from sqlalchemy import select
@@ -17,15 +18,16 @@ from app.core.db import async_session_maker
 from app.core.task_manager import DeliveryMode, SqlAlchemyTaskStore, TaskManager
 from app.core.task_manager.types import TaskStatus
 from app.dependencies import get_llm
+from app.models.studio import Project
 from app.models.task import GenerationTask, GenerationTaskStatus
 from app.models.task_links import GenerationTaskLink
 from app.chains.agents import EntityMergerAgent, VariantAnalyzerAgent
+from app.services.common import required_field
 
 
 logger = logging.getLogger(__name__)
 
 CHAPTER_DIVISION_RELATION_TYPE = "chapter_division"
-SCRIPT_EXTRACTION_RELATION_TYPE = "script_extraction"
 ENTITY_MERGE_RELATION_TYPE = "entity_merge"  # 预备能力：当前无真实前端入口
 CONSISTENCY_CHECK_RELATION_TYPE = "consistency_check"
 VARIANT_ANALYSIS_RELATION_TYPE = "variant_analysis"  # 预备能力：当前无真实前端入口
@@ -35,8 +37,9 @@ SCENE_INFO_ANALYSIS_RELATION_TYPE = "scene_info_analysis"
 COSTUME_INFO_ANALYSIS_RELATION_TYPE = "costume_info_analysis"
 SCRIPT_OPTIMIZATION_RELATION_TYPE = "script_optimization"
 SCRIPT_SIMPLIFICATION_RELATION_TYPE = "script_simplification"
+ASSET_EXTRACTION_RELATION_TYPE = "asset_extraction"
+ASSET_BINDING_RELATION_TYPE = "asset_binding"
 SCRIPT_DIVIDE_TASK_KIND = "script_divide"
-SCRIPT_EXTRACT_TASK_KIND = "script_extract"
 SCRIPT_MERGE_TASK_KIND = "script_merge"
 SCRIPT_CONSISTENCY_TASK_KIND = "script_consistency"
 SCRIPT_VARIANT_TASK_KIND = "script_variant"
@@ -186,18 +189,6 @@ def spawn_divide_task(task_id: str) -> None:
     enqueue_task_execution(task_id)
 
 
-async def find_active_extract_task(
-    db: AsyncSession,
-    *,
-    chapter_id: str,
-) -> GenerationTask | None:
-    return await _find_active_task(
-        db,
-        relation_type=SCRIPT_EXTRACTION_RELATION_TYPE,
-        relation_entity_id=chapter_id,
-    )
-
-
 async def find_active_merge_task(
     db: AsyncSession,
     *,
@@ -279,59 +270,6 @@ def pick_analysis_relation_entity_id(
     if not relation_entity_id:
         raise HTTPException(status_code=400, detail=f"relation_entity_id or chapter_id or project_id is required for {endpoint}")
     return relation_entity_id
-
-
-async def create_extract_task(
-    db: AsyncSession,
-    *,
-    project_id: str,
-    chapter_id: str,
-    script_division: dict,
-    consistency: dict | None,
-    refresh_cache: bool,
-) -> AsyncTaskCreateResult:
-    existing = await find_active_extract_task(db, chapter_id=chapter_id)
-    if existing is not None:
-        status_value = existing.status.value if hasattr(existing.status, "value") else str(existing.status)
-        return AsyncTaskCreateResult(
-            task_id=existing.id,
-            status=TaskStatus(status_value),
-            reused=True,
-            relation_type=SCRIPT_EXTRACTION_RELATION_TYPE,
-            relation_entity_id=chapter_id,
-        )
-
-    store = SqlAlchemyTaskStore(db)
-    tm = TaskManager(store=store, strategies={})
-    run_args = {
-        "project_id": project_id,
-        "chapter_id": chapter_id,
-        "script_division": script_division,
-        "consistency": consistency,
-        "refresh_cache": refresh_cache,
-    }
-    task_record = await tm.create(
-        task=_CreateOnlyTask(),
-        mode=DeliveryMode.async_polling,
-        task_kind=SCRIPT_EXTRACT_TASK_KIND,
-        run_args=run_args,
-    )
-    db.add(
-        GenerationTaskLink(
-            task_id=task_record.id,
-            resource_type="task_link",
-            relation_type=SCRIPT_EXTRACTION_RELATION_TYPE,
-            relation_entity_id=chapter_id,
-        )
-    )
-    await db.flush()
-    return AsyncTaskCreateResult(
-        task_id=task_record.id,
-        status=task_record.status,
-        reused=False,
-        relation_type=SCRIPT_EXTRACTION_RELATION_TYPE,
-        relation_entity_id=chapter_id,
-    )
 
 
 async def create_merge_task(
@@ -637,58 +575,6 @@ async def create_script_simplification_task(
     )
 
 
-def spawn_extract_task(task_id: str) -> None:
-    from app.tasks.execute_task import enqueue_task_execution
-
-    enqueue_task_execution(task_id)
-
-
-async def run_merge_task(task_id: str) -> None:
-    async with async_session_maker() as db:
-        store = SqlAlchemyTaskStore(db)
-        task = await store.get(task_id)
-        if task is None:
-            logger.warning("merge task not found: %s", task_id)
-            return
-
-        if await _cancel_if_requested(store, task_id, db):
-            return
-
-        await store.set_status(task_id, TaskStatus.running)
-        await store.set_progress(task_id, 5)
-        await db.commit()
-        run_args = task.payload.get("run_args") or {}
-
-    try:
-        async with async_session_maker() as db:
-            store = SqlAlchemyTaskStore(db)
-            if await _cancel_if_requested(store, task_id, db):
-                return
-
-            llm = await get_llm(db)
-            agent = EntityMergerAgent(llm)
-            result: EntityMergeResult = agent.extract(
-                all_extractions_json=json.dumps(run_args.get("all_shot_extractions") or [], ensure_ascii=False),
-                historical_library_json=json.dumps(run_args.get("historical_library") or {}, ensure_ascii=False),
-                script_division_json=json.dumps(run_args.get("script_division") or {}, ensure_ascii=False),
-                previous_merge_json=json.dumps(run_args.get("previous_merge") or {}, ensure_ascii=False),
-                conflict_resolutions_json=json.dumps(run_args.get("conflict_resolutions") or [], ensure_ascii=False),
-            )
-            await store.set_progress(task_id, 100)
-            await store.set_result(task_id, result.model_dump())
-            if await _cancel_if_requested(store, task_id, db):
-                return
-            await store.set_status(task_id, TaskStatus.succeeded)
-            await db.commit()
-    except Exception as exc:  # noqa: BLE001
-        logger.exception("merge task failed: %s", task_id)
-        async with async_session_maker() as db:
-            store = SqlAlchemyTaskStore(db)
-            await store.set_error(task_id, str(exc))
-            await store.set_status(task_id, TaskStatus.failed)
-            await db.commit()
-
-
 def spawn_merge_task(task_id: str) -> None:
     asyncio.create_task(run_merge_task(task_id))
 def spawn_consistency_task(task_id: str) -> None:
@@ -779,17 +665,87 @@ def spawn_script_simplification_task(task_id: str) -> None:
 
 # === Phase 3: Asset extraction + binding tasks ===
 
+
+def pick_extract_relation_entity_id(*, project_id: str | None) -> str:
+    """Resolve the relation_entity_id for asset-extraction tasks (project-scoped)."""
+    relation_entity_id = (project_id or "").strip()
+    if not relation_entity_id:
+        raise HTTPException(
+            status_code=400,
+            detail=required_field("project_id", when="asset-extract-async"),
+        )
+    return relation_entity_id
+
+
+def pick_bind_relation_entity_id(*, chapter_id: str | None) -> str:
+    """Resolve the relation_entity_id for asset-binding tasks (chapter-scoped)."""
+    relation_entity_id = (chapter_id or "").strip()
+    if not relation_entity_id:
+        raise HTTPException(
+            status_code=400,
+            detail=required_field("chapter_id", when="bind-assets-async"),
+        )
+    return relation_entity_id
+
+
+async def _find_active_asset_extract_task(
+    db: AsyncSession,
+    *,
+    project_id: str,
+) -> GenerationTask | None:
+    return await _find_active_task(
+        db,
+        relation_type=ASSET_EXTRACTION_RELATION_TYPE,
+        relation_entity_id=project_id,
+    )
+
+
+async def _find_active_asset_bind_task(
+    db: AsyncSession,
+    *,
+    chapter_id: str,
+) -> GenerationTask | None:
+    return await _find_active_task(
+        db,
+        relation_type=ASSET_BINDING_RELATION_TYPE,
+        relation_entity_id=chapter_id,
+    )
+
+
 async def create_asset_extract_task(
     db: AsyncSession,
     *,
     project_id: str,
     script_text: str,
+    write_to_db: bool = False,
 ) -> AsyncTaskCreateResult:
+    """Create a project-level asset extraction task.
+
+    Phase 3: decoupled from script division. Runs against the full script text and
+    extracts a project-level asset library (characters/scenes/props/costumes).
+    The worker persists results when ``project_id`` is present; ``write_to_db``
+    is kept for field symmetry with other script-processing endpoints and, when
+    True, also bumps ``project.updated_at`` so the project list reflects activity.
+    """
+    project_id = pick_extract_relation_entity_id(project_id=project_id)
+
+    existing = await _find_active_asset_extract_task(db, project_id=project_id)
+    if existing is not None:
+        status_value = existing.status.value if hasattr(existing.status, "value") else str(existing.status)
+        return AsyncTaskCreateResult(
+            task_id=existing.id,
+            status=TaskStatus(status_value),
+            reused=True,
+            relation_type=ASSET_EXTRACTION_RELATION_TYPE,
+            relation_entity_id=project_id,
+        )
+
     store = SqlAlchemyTaskStore(db)
     tm = TaskManager(store=store, strategies={})
     run_args = {
         "project_id": project_id,
         "script_text": script_text,
+        "write_to_db": bool(write_to_db),
     }
     task_record = await tm.create(
         task=_CreateOnlyTask(),
@@ -797,16 +753,25 @@ async def create_asset_extract_task(
         task_kind=SCRIPT_ASSET_EXTRACT_TASK_KIND,
         run_args=run_args,
     )
-    await store.link_task(
-        task_id=task_record.id,
-        relation_type="asset_extraction",
-        relation_entity_id=project_id,
+    db.add(
+        GenerationTaskLink(
+            task_id=task_record.id,
+            resource_type="task_link",
+            relation_type=ASSET_EXTRACTION_RELATION_TYPE,
+            relation_entity_id=project_id,
+        )
     )
+    if write_to_db:
+        project = await db.get(Project, project_id)
+        if project is not None:
+            project.updated_at = datetime.now(timezone.utc)
+    await db.flush()
+
     return AsyncTaskCreateResult(
         task_id=task_record.id,
-        status=TaskStatus.created,
+        status=task_record.status,
         reused=False,
-        relation_type="asset_extraction",
+        relation_type=ASSET_EXTRACTION_RELATION_TYPE,
         relation_entity_id=project_id,
     )
 
@@ -817,13 +782,34 @@ async def create_asset_bind_task(
     chapter_id: str,
     script_division_json: str,
     asset_list_json: str,
+    write_to_db: bool = False,
 ) -> AsyncTaskCreateResult:
+    """Create a shot-level asset binding task.
+
+    Phase 3: consumes a division result + an existing asset list and binds assets
+    to shots. ``write_to_db`` is kept for field symmetry; the worker always
+    persists bindings when ``chapter_id`` is present.
+    """
+    chapter_id = pick_bind_relation_entity_id(chapter_id=chapter_id)
+
+    existing = await _find_active_asset_bind_task(db, chapter_id=chapter_id)
+    if existing is not None:
+        status_value = existing.status.value if hasattr(existing.status, "value") else str(existing.status)
+        return AsyncTaskCreateResult(
+            task_id=existing.id,
+            status=TaskStatus(status_value),
+            reused=True,
+            relation_type=ASSET_BINDING_RELATION_TYPE,
+            relation_entity_id=chapter_id,
+        )
+
     store = SqlAlchemyTaskStore(db)
     tm = TaskManager(store=store, strategies={})
     run_args = {
         "chapter_id": chapter_id,
         "script_division_json": script_division_json,
         "asset_list_json": asset_list_json,
+        "write_to_db": bool(write_to_db),
     }
     task_record = await tm.create(
         task=_CreateOnlyTask(),
@@ -831,25 +817,34 @@ async def create_asset_bind_task(
         task_kind=SCRIPT_ASSET_BIND_TASK_KIND,
         run_args=run_args,
     )
-    await store.link_task(
-        task_id=task_record.id,
-        relation_type="asset_binding",
-        relation_entity_id=chapter_id,
+    db.add(
+        GenerationTaskLink(
+            task_id=task_record.id,
+            resource_type="task_link",
+            relation_type=ASSET_BINDING_RELATION_TYPE,
+            relation_entity_id=chapter_id,
+        )
     )
+    await db.flush()
+
     return AsyncTaskCreateResult(
         task_id=task_record.id,
-        status=TaskStatus.created,
+        status=task_record.status,
         reused=False,
-        relation_type="asset_binding",
+        relation_type=ASSET_BINDING_RELATION_TYPE,
         relation_entity_id=chapter_id,
     )
 
 
 def spawn_asset_extract_task(task_id: str) -> None:
+    """统一封装后台启动：通过 Celery 执行入口派发 asset-extract 任务。"""
     from app.tasks.execute_task import enqueue_task_execution
+
     enqueue_task_execution(task_id)
 
 
 def spawn_asset_bind_task(task_id: str) -> None:
+    """统一封装后台启动：通过 Celery 执行入口派发 asset-bind 任务。"""
     from app.tasks.execute_task import enqueue_task_execution
+
     enqueue_task_execution(task_id)

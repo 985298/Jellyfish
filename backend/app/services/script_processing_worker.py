@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import json
 import logging
+import uuid as _uuid
 from typing import Any
 
 from fastapi import HTTPException
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.chains.agents import ElementExtractorAgent, ScriptDividerAgent
+from app.chains.agents import ScriptDividerAgent
 from app.chains.agents import (
     CharacterPortraitAnalysisAgent,
     ConsistencyCheckerAgent,
@@ -19,6 +21,7 @@ from app.chains.agents import (
     ScriptOptimizerAgent,
     ScriptSimplifierAgent,
 )
+from app.chains.agents.asset_extractor_agent import AssetExtractorAgent, ShotBinderAgent
 from app.chains.agents.script_processing_agents import (
     ScriptConsistencyCheckResult,
     ScriptDivisionResult,
@@ -26,20 +29,25 @@ from app.chains.agents.script_processing_agents import (
     ScriptSimplificationResult,
 )
 from app.core.db_sync import sync_session_maker
-from app.services.script_extraction_cache import (
-    build_script_extract_cache_key,
-    get_cached_script_extract,
-    set_cached_script_extract,
+from app.models.studio import (
+    Character,
+    Chapter,
+    Costume,
+    Project,
+    ProjectCostumeLink,
+    ProjectPropLink,
+    ProjectSceneLink,
+    ProjectStyle,
+    ProjectVisualStyle,
+    Prop,
+    Scene,
+    Shot,
+    ShotCharacterLink,
+    ShotExtractedCandidate,
 )
+from app.models.types import ShotCandidateStatus, ShotCandidateType
 from app.services.llm.runtime import build_default_text_llm_sync
 from app.services.studio.script_division import write_division_result_to_chapter_sync
-from app.services.studio.shot_extracted_candidates import (
-    sync_from_extraction_draft_sync as sync_shot_extracted_candidates_from_draft_sync,
-)
-from app.services.studio.shot_extracted_dialogue_candidates import (
-    sync_from_extraction_draft_sync as sync_shot_extracted_dialogue_candidates_from_draft_sync,
-)
-from app.services.studio.shot_semantic_defaults import apply_shot_semantic_defaults_from_draft_sync
 from app.services.worker.task_executor import (
     AbstractLLMResultGenerator,
     AbstractWorkerTaskExecutor,
@@ -50,29 +58,15 @@ from app.services.worker.task_executor import (
 logger = logging.getLogger(__name__)
 
 
+# === LLM Result Generators ===
+
+
 class DivideResultGenerator(AbstractLLMResultGenerator):
     thinking = False
 
     def generate_with_llm(self, llm, run_args: dict[str, Any]) -> ScriptDivisionResult:
         agent = ScriptDividerAgent(llm)
         return agent.divide_script(script_text=str(run_args.get("script_text") or ""))
-
-
-class ExtractResultGenerator(AbstractLLMResultGenerator):
-    thinking = False
-
-    def generate(self, db: Session, run_args: dict[str, Any]) -> tuple[Any, bool]:
-        return generate_extraction_result(
-            db=db,
-            project_id=str(run_args.get("project_id") or ""),
-            chapter_id=str(run_args.get("chapter_id") or ""),
-            script_division=dict(run_args.get("script_division") or {}),
-            consistency=dict(run_args.get("consistency") or {}) if run_args.get("consistency") else None,
-            refresh_cache=bool(run_args.get("refresh_cache")),
-        )
-
-    def generate_with_llm(self, llm, run_args: dict[str, Any]) -> Any:  # pragma: no cover - 不直接走这里
-        raise NotImplementedError
 
 
 class ConsistencyResultGenerator(AbstractLLMResultGenerator):
@@ -146,6 +140,39 @@ class ScriptSimplificationResultGenerator(AbstractLLMResultGenerator):
         return agent.extract(script_text=str(run_args.get("script_text") or ""))
 
 
+# === Phase 3: Asset extraction + binding generators ===
+
+
+class AssetExtractResultGenerator(AbstractLLMResultGenerator):
+    """Generates project-level assets from script text (no division needed)."""
+
+    thinking = False
+
+    def generate_with_llm(self, llm, run_args: dict[str, Any]) -> Any:
+        agent = AssetExtractorAgent(llm)
+        return agent.extract(
+            project_id=str(run_args.get("project_id") or ""),
+            script_text=str(run_args.get("script_text") or ""),
+        )
+
+
+class AssetBindResultGenerator(AbstractLLMResultGenerator):
+    """Binds existing project assets to shots using ShotBinderAgent."""
+
+    thinking = False
+
+    def generate_with_llm(self, llm, run_args: dict[str, Any]) -> Any:
+        agent = ShotBinderAgent(llm)
+        return agent.extract(
+            chapter_id=str(run_args.get("chapter_id") or ""),
+            script_division_json=str(run_args.get("script_division_json") or ""),
+            asset_list_json=str(run_args.get("asset_list_json") or ""),
+        )
+
+
+# === Task Executors ===
+
+
 class DivideTaskExecutor(AbstractWorkerTaskExecutor):
     task_kind = "script_divide"
     timeout_seconds = 1800.0
@@ -165,33 +192,6 @@ class DivideTaskExecutor(AbstractWorkerTaskExecutor):
         if not chapter_id:
             raise HTTPException(status_code=400, detail="chapter_id is required for write_to_db=true")
         apply_division_result(ctx.db, chapter_id=chapter_id, result=result)
-
-
-class ExtractTaskExecutor(AbstractWorkerTaskExecutor):
-    task_kind = "script_extract"
-    timeout_seconds = 1800.0
-
-    def __init__(self) -> None:
-        super().__init__(session_maker=sync_session_maker)
-        self._generator = ExtractResultGenerator()
-
-    def execute(self, ctx: WorkerTaskContext, run_args: dict[str, Any]) -> tuple[Any, bool]:
-        return self._generator.generate(ctx.db, run_args)
-
-    def serialize_result(self, result: tuple[Any, bool]) -> dict[str, Any]:
-        draft, from_cache = result
-        return {
-            "draft": draft.model_dump(),
-            "from_cache": from_cache,
-        }
-
-    def should_apply(self, ctx: WorkerTaskContext, run_args: dict[str, Any], result: tuple[Any, bool]) -> bool:  # noqa: ARG002
-        return True
-
-    def apply_result(self, ctx: WorkerTaskContext, run_args: dict[str, Any], result: tuple[Any, bool]) -> None:
-        draft, _from_cache = result
-        chapter_id = str(run_args.get("chapter_id") or "")
-        apply_extraction_result(ctx.db, chapter_id=chapter_id, draft=draft)
 
 
 class ConsistencyTaskExecutor(AbstractWorkerTaskExecutor):
@@ -250,6 +250,353 @@ class ScriptSimplificationTaskExecutor(_SimpleLLMTaskExecutor):
     generator_class = ScriptSimplificationResultGenerator
 
 
+# === Phase 3: Asset extraction + binding executors ===
+
+
+def _default_style_for_project(db: Session, project_id: str) -> tuple[str, str]:
+    """Resolve (style, visual_style) for a project, falling back to defaults."""
+    project = db.get(Project, project_id)
+    if project is not None:
+        return (
+            str(getattr(project, "style", None) or ProjectStyle.real_people_city.value),
+            str(getattr(project, "visual_style", None) or ProjectVisualStyle.live_action.value),
+        )
+    return ProjectStyle.real_people_city.value, ProjectVisualStyle.live_action.value
+
+
+def _existing_character_id_by_name(db: Session, *, project_id: str, name: str) -> str | None:
+    stmt = select(Character.id).where(
+        Character.project_id == project_id,
+        Character.name == name,
+    ).limit(1)
+    row = db.execute(stmt).scalar_one_or_none()
+    return str(row) if row is not None else None
+
+
+def _existing_asset_id_by_name(db: Session, *, model: type, name: str) -> str | None:
+    stmt = select(model.id).where(model.name == name).limit(1)
+    row = db.execute(stmt).scalar_one_or_none()
+    return str(row) if row is not None else None
+
+
+def _ensure_project_link(
+    db: Session,
+    *,
+    link_model: type,
+    asset_field: str,
+    asset_id: str,
+    project_id: str,
+) -> None:
+    """Idempotently ensure a project-level link row exists (chapter/shot = None)."""
+    asset_col = getattr(link_model, asset_field)
+    stmt = select(link_model.id).where(
+        asset_col == asset_id,
+        link_model.project_id == project_id,
+        link_model.chapter_id.is_(None),
+        link_model.shot_id.is_(None),
+    ).limit(1)
+    existing = db.execute(stmt).scalar_one_or_none()
+    if existing is not None:
+        return
+    db.add(
+        link_model(
+            project_id=project_id,
+            chapter_id=None,
+            shot_id=None,
+            **{asset_field: asset_id},
+        )
+    )
+    db.flush()
+
+
+class AssetExtractTaskExecutor(AbstractWorkerTaskExecutor):
+    """Extracts project-level assets (characters/scenes/props/costumes) from script text.
+
+    Phase 3: decoupled from script division. Runs against the full script text and
+    persists a project-level asset library. No shots or bindings are produced here.
+    """
+
+    task_kind = "script_asset_extract"
+    timeout_seconds = 600.0
+    succeeded_progress = 100
+
+    def __init__(self) -> None:
+        super().__init__(session_maker=sync_session_maker)
+        self._generator = AssetExtractResultGenerator()
+
+    def execute(self, ctx: WorkerTaskContext, run_args: dict[str, Any]) -> Any:
+        return self._generator.generate(ctx.db, run_args)
+
+    def should_apply(self, ctx: WorkerTaskContext, run_args: dict[str, Any], result: Any) -> bool:  # noqa: ARG002
+        return bool(run_args.get("project_id"))
+
+    def apply_result(self, ctx: WorkerTaskContext, run_args: dict[str, Any], result: Any) -> None:
+        project_id = str(run_args.get("project_id") or "")
+        if not project_id:
+            raise HTTPException(status_code=400, detail="project_id is required for script_asset_extract")
+
+        if project_id != getattr(result, "project_id", project_id):
+            # Trust the agent's result project_id if present; keep run_args as fallback.
+            pass
+
+        style, visual_style = _default_style_for_project(ctx.db, project_id)
+        ctx.db.flush()
+
+        created_counts = {"character": 0, "scene": 0, "prop": 0, "costume": 0}
+
+        # Characters: backend-owned id; idempotent by (project_id, name).
+        for char in list(getattr(result, "characters", []) or []):
+            name = str(getattr(char, "name", "") or "").strip()
+            if not name:
+                continue
+            try:
+                existing_id = _existing_character_id_by_name(ctx.db, project_id=project_id, name=name)
+                if existing_id is not None:
+                    continue
+                description = str(getattr(char, "description", "") or "")
+                ctx.db.add(
+                    Character(
+                        id=f"char_{_uuid.uuid4().hex[:12]}",
+                        project_id=project_id,
+                        name=name,
+                        description=description,
+                        style=style,
+                        visual_style=visual_style,
+                        actor_id=None,
+                        costume_id=None,
+                    )
+                )
+                ctx.db.flush()
+                created_counts["character"] += 1
+            except Exception:
+                logger.exception("asset_extract: failed to persist character %r for project %s", name, project_id)
+
+        # Assets: scene/prop/costume share the same shape; idempotent by name (global unique).
+        asset_specs = (
+            (Scene, "scene", ProjectSceneLink, "scene_id"),
+            (Prop, "prop", ProjectPropLink, "prop_id"),
+            (Costume, "costume", ProjectCostumeLink, "costume_id"),
+        )
+        for model, label, link_model, asset_field in asset_specs:
+            items = list(getattr(result, f"{label}s", []) or [])
+            for item in items:
+                name = str(getattr(item, "name", "") or "").strip()
+                if not name:
+                    continue
+                try:
+                    existing_id = _existing_asset_id_by_name(ctx.db, model=model, name=name)
+                    if existing_id is not None:
+                        # Ensure the existing asset is linked to this project.
+                        _ensure_project_link(
+                            ctx.db,
+                            link_model=link_model,
+                            asset_field=asset_field,
+                            asset_id=existing_id,
+                            project_id=project_id,
+                        )
+                        continue
+                    description = str(getattr(item, "description", "") or "")
+                    tags = list(getattr(item, "tags", []) or [])
+                    view_count = int(getattr(item, "view_count", 1) or 1)
+                    if view_count < 1:
+                        view_count = 1
+                    asset_id = f"{label}_{_uuid.uuid4().hex[:12]}"
+                    ctx.db.add(
+                        model(
+                            id=asset_id,
+                            name=name,
+                            description=description,
+                            style=style,
+                            visual_style=visual_style,
+                            tags=tags,
+                            view_count=view_count,
+                            prompt_template_id=None,
+                        )
+                    )
+                    ctx.db.flush()
+                    _ensure_project_link(
+                        ctx.db,
+                        link_model=link_model,
+                        asset_field=asset_field,
+                        asset_id=asset_id,
+                        project_id=project_id,
+                    )
+                    created_counts[label] += 1
+                except Exception:
+                    logger.exception("asset_extract: failed to persist %s %r for project %s", label, name, project_id)
+
+        ctx.db.commit()
+        logger.info(
+            "asset_extract applied: project_id=%s created=%s",
+            project_id,
+            created_counts,
+        )
+
+
+class AssetBindTaskExecutor(AbstractWorkerTaskExecutor):
+    """Binds existing project assets to shots based on script division.
+
+    Phase 3: consumes the division result + an asset list, resolves each named
+    asset to its stable entity id, and persists shot-level bindings (ShotCharacterLink
+    + ShotExtractedCandidate linked state). Does NOT create new assets.
+    """
+
+    task_kind = "script_asset_bind"
+    timeout_seconds = 300.0
+    succeeded_progress = 100
+
+    def __init__(self) -> None:
+        super().__init__(session_maker=sync_session_maker)
+        self._generator = AssetBindResultGenerator()
+
+    def execute(self, ctx: WorkerTaskContext, run_args: dict[str, Any]) -> Any:
+        return self._generator.generate(ctx.db, run_args)
+
+    def should_apply(self, ctx: WorkerTaskContext, run_args: dict[str, Any], result: Any) -> bool:  # noqa: ARG002
+        return bool(run_args.get("chapter_id"))
+
+    def apply_result(self, ctx: WorkerTaskContext, run_args: dict[str, Any], result: Any) -> None:
+        chapter_id = str(run_args.get("chapter_id") or "")
+        if not chapter_id:
+            raise HTTPException(status_code=400, detail="chapter_id is required for script_asset_bind")
+
+        chapter = ctx.db.get(Chapter, chapter_id)
+        if chapter is None:
+            raise HTTPException(status_code=400, detail="Chapter not found")
+        project_id = str(chapter.project_id)
+
+        shots = list(
+            ctx.db.execute(
+                select(Shot).where(Shot.chapter_id == chapter_id)
+            ).scalars().all()
+        )
+        shot_by_index: dict[int, Shot] = {shot.index: shot for shot in shots}
+
+        # Pre-resolve asset name -> id maps scoped to this project / global table.
+        def _resolve_character(name: str) -> str | None:
+            return _existing_character_id_by_name(ctx.db, project_id=project_id, name=name)
+
+        def _resolve_asset(model: type, name: str) -> str | None:
+            return _existing_asset_id_by_name(ctx.db, model=model, name=name)
+
+        bound_counts = {"character": 0, "scene": 0, "prop": 0, "costume": 0}
+
+        for shot_binding in list(getattr(result, "shots", []) or []):
+            index = getattr(shot_binding, "index", None)
+            shot = shot_by_index.get(int(index)) if index is not None else None
+            if shot is None:
+                continue
+
+            # Characters: upsert ShotCharacterLink + mark candidate linked.
+            character_names = [str(n).strip() for n in (getattr(shot_binding, "character_names", []) or []) if str(n).strip()]
+            existing_link_char_ids = {
+                str(row[0])
+                for row in ctx.db.execute(
+                    select(ShotCharacterLink.character_id).where(ShotCharacterLink.shot_id == shot.id)
+                ).all()
+            }
+            next_index = (
+                int(
+                    ctx.db.execute(
+                        select(ShotCharacterLink.index)
+                        .where(ShotCharacterLink.shot_id == shot.id)
+                        .order_by(ShotCharacterLink.index.desc())
+                        .limit(1)
+                    ).scalar() or 0
+                )
+            )
+            for name in character_names:
+                char_id = _resolve_character(name)
+                if char_id is None:
+                    continue
+                if char_id in existing_link_char_ids:
+                    bound_counts["character"] += 1
+                    continue
+                next_index += 1
+                ctx.db.add(
+                    ShotCharacterLink(
+                        shot_id=shot.id,
+                        character_id=char_id,
+                        index=next_index,
+                        note="",
+                    )
+                )
+                bound_counts["character"] += 1
+            ctx.db.flush()
+
+            # Scene / prop / costume: mark ShotExtractedCandidate linked by name.
+            scene_name = getattr(shot_binding, "scene_name", None)
+            if scene_name:
+                scene_name = str(scene_name).strip()
+                if scene_name:
+                    scene_id = _resolve_asset(Scene, scene_name)
+                    self._mark_candidate_linked(
+                        ctx.db, shot_id=shot.id, candidate_type=ShotCandidateType.scene,
+                        candidate_name=scene_name, linked_entity_id=scene_id,
+                    )
+                    bound_counts["scene"] += 1
+
+            for name in (getattr(shot_binding, "prop_names", []) or []):
+                name = str(name).strip()
+                if not name:
+                    continue
+                prop_id = _resolve_asset(Prop, name)
+                self._mark_candidate_linked(
+                    ctx.db, shot_id=shot.id, candidate_type=ShotCandidateType.prop,
+                    candidate_name=name, linked_entity_id=prop_id,
+                )
+                bound_counts["prop"] += 1
+
+            for name in (getattr(shot_binding, "costume_names", []) or []):
+                name = str(name).strip()
+                if not name:
+                    continue
+                costume_id = _resolve_asset(Costume, name)
+                self._mark_candidate_linked(
+                    ctx.db, shot_id=shot.id, candidate_type=ShotCandidateType.costume,
+                    candidate_name=name, linked_entity_id=costume_id,
+                )
+                bound_counts["costume"] += 1
+
+        ctx.db.commit()
+        logger.info(
+            "asset_bind applied: chapter_id=%s bound=%s",
+            chapter_id,
+            bound_counts,
+        )
+
+    @staticmethod
+    def _mark_candidate_linked(
+        db: Session,
+        *,
+        shot_id: str,
+        candidate_type: ShotCandidateType,
+        candidate_name: str,
+        linked_entity_id: str | None,
+    ) -> None:
+        """Mark a matching ShotExtractedCandidate as linked (if any). Idempotent / silent."""
+        if not linked_entity_id:
+            return
+        stmt = (
+            select(ShotExtractedCandidate)
+            .where(ShotExtractedCandidate.shot_id == shot_id)
+            .where(ShotExtractedCandidate.candidate_type == candidate_type)
+            .where(ShotExtractedCandidate.candidate_name == candidate_name)
+            .order_by(ShotExtractedCandidate.id.asc())
+            .limit(1)
+        )
+        row = db.execute(stmt).scalars().first()
+        if row is None:
+            return
+        row.candidate_status = ShotCandidateStatus.linked
+        row.linked_entity_id = linked_entity_id
+        from datetime import datetime, timezone
+        row.confirmed_at = datetime.now(timezone.utc)
+
+
+# === Sync helpers / public entry points ===
+
+
 def generate_division_result(
     *,
     db: Session,
@@ -269,61 +616,8 @@ def apply_division_result(
     write_division_result_to_chapter_sync(db, chapter_id=chapter_id, result=result)
 
 
-def generate_extraction_result(
-    *,
-    db: Session,
-    project_id: str,
-    chapter_id: str,
-    script_division: dict[str, Any],
-    consistency: dict[str, Any] | None,
-    refresh_cache: bool,
-) -> tuple[Any, bool]:
-    cache_key = build_script_extract_cache_key(
-        project_id=project_id,
-        chapter_id=chapter_id,
-        script_division=script_division,
-        consistency=consistency,
-    )
-
-    result = None
-    from_cache = False
-    if not refresh_cache:
-        result = get_cached_script_extract(cache_key)
-        from_cache = result is not None
-
-    if result is None:
-        llm = build_default_text_llm_sync(db, thinking=False)
-        agent = ElementExtractorAgent(llm)
-        result = agent.extract(
-            project_id=project_id,
-            chapter_id=chapter_id,
-            script_division_json=json.dumps(script_division, ensure_ascii=False),
-            consistency_json=json.dumps(consistency or {}, ensure_ascii=False),
-        )
-        set_cached_script_extract(cache_key, result)
-
-    return result, from_cache
-
-
-def apply_extraction_result(
-    db: Session,
-    *,
-    chapter_id: str,
-    draft: Any,
-) -> None:
-    """将提取草稿同步为候选与镜头语言默认值。"""
-
-    sync_shot_extracted_candidates_from_draft_sync(db, chapter_id=chapter_id, draft=draft)
-    sync_shot_extracted_dialogue_candidates_from_draft_sync(db, chapter_id=chapter_id, draft=draft)
-    apply_shot_semantic_defaults_from_draft_sync(db, chapter_id=chapter_id, draft=draft)
-
-
 def run_divide_task_sync(task_id: str) -> None:
     DivideTaskExecutor().run(task_id)
-
-
-def run_extract_task_sync(task_id: str) -> None:
-    ExtractTaskExecutor().run(task_id)
 
 
 def run_consistency_task_sync(task_id: str) -> None:
@@ -354,132 +648,11 @@ def run_script_simplification_task_sync(task_id: str) -> None:
     ScriptSimplificationTaskExecutor().run(task_id)
 
 
-# === Phase 2: Decoupled task executors ===
-
-class AssetExtractResultGenerator(AbstractLLMResultGenerator):
-    """Generates project-level assets from script text (no division needed)."""
-    thinking = False
-
-    def generate_with_llm(self, llm, run_args: dict[str, Any]) -> Any:
-        from app.chains.agents.asset_extractor_agent import AssetExtractorAgent
-        agent = AssetExtractorAgent(llm)
-        return agent.extract(
-            project_id=str(run_args.get("project_id") or ""),
-            script_text=str(run_args.get("script_text") or ""),
-        )
+def run_asset_extract_task_sync(task_id: str) -> None:
+    """Phase 3 sync entry point for script_asset_extract tasks."""
+    AssetExtractTaskExecutor().run(task_id)
 
 
-class AssetExtractTaskExecutor(AbstractWorkerTaskExecutor):
-    """Extracts project-level assets (characters/scenes/props/costumes) from script text."""
-    task_kind = "script_asset_extract"
-    timeout_seconds = 300.0
-
-    def __init__(self) -> None:
-        super().__init__(session_maker=sync_session_maker)
-        self._generator = AssetExtractResultGenerator()
-
-    def execute(self, ctx: WorkerTaskContext, run_args: dict[str, Any]) -> tuple[Any, bool]:
-        return self._generator.generate(ctx.db, run_args)
-
-    def serialize_result(self, result: tuple[Any, bool]) -> dict[str, Any]:
-        draft, from_cache = result
-        return {"draft": draft.model_dump(), "from_cache": from_cache}
-
-    def should_apply(self, ctx, run_args, result) -> bool:
-        return True
-
-    def apply_result(self, ctx: WorkerTaskContext, run_args: dict[str, Any], result: tuple[Any, bool]) -> None:
-        draft, _ = result
-        project_id = str(run_args.get("project_id") or "")
-        if not project_id:
-            return
-        from app.services.studio.entity_crud import create_entity as _create_entity
-        import uuid
-        created = 0
-        for char in (draft.characters or []):
-            try:
-                body = {"project_id": project_id, "name": char.name}
-                if hasattr(char, "description") and char.description:
-                    body["description"] = char.description
-                _create_entity(ctx.db, entity_type="character", body=body)
-                created += 1
-            except Exception:
-                pass
-        for asset_type, items in [("scene", draft.scenes or []), ("prop", draft.props or []), ("costume", draft.costumes or [])]:
-            for item in items:
-                try:
-                    body = {
-                        "project_id": project_id,
-                        "name": item.name,
-                        "id": f"{asset_type}_{uuid.uuid4().hex[:12]}",
-                        "style": "\u771f\u4eba\u90fd\u5e02",
-                        "view_count": getattr(item, "view_count", 1) or 1,
-                    }
-                    if hasattr(item, "description") and item.description:
-                        body["description"] = item.description
-                    _create_entity(ctx.db, entity_type=asset_type, body=body)
-                    created += 1
-                except Exception:
-                    pass
-        ctx.db.commit()
-
-
-class AssetBindResultGenerator(AbstractLLMResultGenerator):
-    """Binds existing assets to shots using ShotBinderAgent."""
-    thinking = False
-
-    def generate_with_llm(self, llm, run_args: dict[str, Any]) -> Any:
-        from app.chains.agents.asset_extractor_agent import ShotBinderAgent
-        agent = ShotBinderAgent(llm)
-        return agent.extract(
-            chapter_id=str(run_args.get("chapter_id") or ""),
-            script_division_json=str(run_args.get("script_division_json") or ""),
-            asset_list_json=str(run_args.get("asset_list_json") or ""),
-        )
-
-
-class AssetBindTaskExecutor(AbstractWorkerTaskExecutor):
-    """Binds existing project assets to shots."""
-    task_kind = "script_asset_bind"
-    timeout_seconds = 300.0
-
-    def __init__(self) -> None:
-        super().__init__(session_maker=sync_session_maker)
-        self._generator = AssetBindResultGenerator()
-
-    def execute(self, ctx: WorkerTaskContext, run_args: dict[str, Any]) -> tuple[Any, bool]:
-        return self._generator.generate(ctx.db, run_args)
-
-    def serialize_result(self, result: tuple[Any, bool]) -> dict[str, Any]:
-        binding, from_cache = result
-        return {"binding": binding.model_dump(), "from_cache": from_cache}
-
-    def should_apply(self, ctx, run_args, result) -> bool:
-        return True
-
-    def apply_result(self, ctx: WorkerTaskContext, run_args: dict[str, Any], result: tuple[Any, bool]) -> None:
-        binding, _ = result
-        from app.services.studio.shot_extracted_candidates import mark_linked_by_name
-        from app.models.studio_shots import Shot
-        from sqlalchemy import select
-        chapter_id = str(run_args.get("chapter_id") or "")
-        if not chapter_id:
-            return
-        shots = ctx.db.execute(
-            select(Shot).where(Shot.chapter_id == chapter_id)
-        ).scalars().all()
-        shot_by_index = {s.index: s for s in shots}
-        for shot_binding in (binding.shots or []):
-            shot = shot_by_index.get(shot_binding.index)
-            if not shot:
-                continue
-            for name in (shot_binding.character_names or []):
-                try:
-                    mark_linked_by_name(
-                        ctx.db, shot_id=shot.id,
-                        candidate_type="character", candidate_name=name,
-                        linked_entity_id="",
-                    )
-                except Exception:
-                    pass
-        ctx.db.commit()
+def run_asset_bind_task_sync(task_id: str) -> None:
+    """Phase 3 sync entry point for script_asset_bind tasks."""
+    AssetBindTaskExecutor().run(task_id)

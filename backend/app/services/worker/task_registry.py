@@ -17,7 +17,6 @@ from app.services.script_processing_worker import (
     ConsistencyTaskExecutor,
     CostumeInfoTaskExecutor,
     DivideTaskExecutor,
-    ExtractTaskExecutor,
     PropInfoTaskExecutor,
     SceneInfoTaskExecutor,
     ScriptOptimizationTaskExecutor,
@@ -44,7 +43,6 @@ class TaskExecutorRegistry:
 task_executor_registry = TaskExecutorRegistry()
 
 task_executor_registry.register("script_divide", DivideTaskExecutor())
-task_executor_registry.register("script_extract", ExtractTaskExecutor())
 task_executor_registry.register("script_asset_extract", AssetExtractTaskExecutor())
 task_executor_registry.register("script_asset_bind", AssetBindTaskExecutor())
 task_executor_registry.register("script_consistency", ConsistencyTaskExecutor())

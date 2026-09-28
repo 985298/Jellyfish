@@ -1,10 +1,11 @@
 import { useEffect, useState, useCallback } from 'react'
-import { Button, Card, Steps, message, Spin, Tag, Space, Result } from 'antd'
-import { CheckCircleOutlined, ClockCircleOutlined, PlayCircleOutlined, ReloadOutlined } from '@ant-design/icons'
-import { ScriptProcessingService, FilmService, StudioChaptersService } from '../../../services/generated'
+import { Button, Card, message, Spin, Tag, Result } from 'antd'
+import { CheckCircleOutlined, ClockCircleOutlined, ReloadOutlined } from '@ant-design/icons'
+import { FilmService, StudioChaptersService } from '../../../services/generated'
 import { useParams, Link } from 'react-router-dom'
 
 const API_BASE = '/api/v1/studio'
+const SCRIPT_API = '/api/v1/script-processing'
 
 type StageStatus = 'done' | 'running' | 'not_started' | 'blocked' | 'partial'
 type Stage = {
@@ -13,24 +14,24 @@ type Stage = {
   desc: string
   status: StageStatus
   actionLabel?: string
-  reviewLink?: string
 }
 
 export default function ChapterPipeline() {
   const { projectId, chapterId } = useParams<{ projectId?: string; chapterId?: string }>()
   const [loading, setLoading] = useState(false)
   const [stages, setStages] = useState<Stage[]>([
-    { key: 'divide', title: '分镜提取', desc: 'LLM 把剧本拆成镜头', status: 'not_started', actionLabel: '开始分镜' },
-    { key: 'extract', title: '元素提取', desc: '从镜头中提取角色/场景/道具', status: 'not_started', actionLabel: '开始提取' },
-    { key: 'confirm', title: '候选确认', desc: '自动创建实体+关联', status: 'not_started', actionLabel: '一键确认' },
-    { key: 'asset_images', title: '资产图片', desc: '生成角色/场景参考图', status: 'not_started', reviewLink: 'review' },
-    { key: 'keyframes', title: '镜头帧图', desc: '生成关键帧', status: 'not_started' },
-    { key: 'videos', title: '视频生成', desc: '生成镜头视频', status: 'not_started' },
-    { key: 'render', title: '章节渲染', desc: '配音+合成成片', status: 'not_started' },
+    { key: 'asset_extract', title: '\u8d44\u4ea7\u63d0\u53d6', desc: 'LLM \u4ece\u5267\u672c\u63d0\u53d6\u89d2\u8272/\u573a\u666f/\u9053\u5177/\u670d\u88c5', status: 'not_started', actionLabel: '\u5f00\u59cb\u63d0\u53d6' },
+    { key: 'asset_images', title: '\u8d44\u4ea7\u56fe\u7247', desc: '\u751f\u6210\u89d2\u8272/\u573a\u666f\u53c2\u8003\u56fe', status: 'not_started' },
+    { key: 'divide', title: '\u5206\u955c\u63d0\u53d6', desc: 'LLM \u628a\u5267\u672c\u62c6\u6210\u955c\u5934', status: 'not_started', actionLabel: '\u5f00\u59cb\u5206\u955c' },
+    { key: 'bind_assets', title: '\u7ed1\u5b9a\u8d44\u4ea7', desc: '\u5c06\u5df2\u6709\u8d44\u4ea7\u7ed1\u5b9a\u5230\u955c\u5934', status: 'not_started', actionLabel: '\u7ed1\u5b9a\u8d44\u4ea7' },
+    { key: 'keyframes', title: '\u955c\u5934\u5e27\u56fe', desc: '\u751f\u6210\u5173\u952e\u5e27', status: 'not_started' },
+    { key: 'videos', title: '\u89c6\u9891\u751f\u6210', desc: '\u751f\u6210\u955c\u5934\u89c6\u9891', status: 'not_started' },
+    { key: 'render', title: '\u7ae0\u8282\u6e32\u67d3', desc: '\u914d\u97f3+\u5408\u6210\u6210\u7247', status: 'not_started' },
   ])
   const [chapterTitle, setChapterTitle] = useState('')
   const [scriptText, setScriptText] = useState('')
   const [divideResult, setDivideResult] = useState<any>(null)
+  const [assetList, setAssetList] = useState<any>(null)
 
   const loadStatus = useCallback(async () => {
     if (!chapterId) return
@@ -38,9 +39,9 @@ export default function ChapterPipeline() {
       const res = await fetch(`${API_BASE}/chapters/${chapterId}/pipeline-status`)
       const data = (await res.json())?.data || {}
       setStages(prev => prev.map(s => {
+        if (s.key === 'asset_extract') return { ...s, status: data.stage_asset_extract || 'not_started' }
         if (s.key === 'divide') return { ...s, status: data.stage_divide || 'not_started' }
-        if (s.key === 'extract') return { ...s, status: data.stage_extract || 'not_started' }
-        if (s.key === 'confirm') return { ...s, status: data.stage_confirm || 'not_started' }
+        if (s.key === 'bind_assets') return { ...s, status: data.stage_bind || 'not_started' }
         return s
       }))
     } catch {}
@@ -78,40 +79,68 @@ export default function ChapterPipeline() {
     setStages(prev => prev.map(s => s.key === key ? { ...s, status } : s))
   }
 
-  const runDivide = async () => {
-    if (!chapterId || !scriptText) return
+  const runAssetExtract = async () => {
+    if (!projectId || !scriptText) return
     setLoading(true)
-    updateStage('divide', 'running')
+    updateStage('asset_extract', 'running')
     try {
-      message.loading({ content: '分镜提取中...', key: 'pipe', duration: 0 })
-      const res = await ScriptProcessingService.divideScriptAsyncApiV1ScriptProcessingDivideAsyncPost({
-        requestBody: { script_text: scriptText, write_to_db: true, chapter_id: chapterId },
+      message.loading({ content: '\u8d44\u4ea7\u63d0\u53d6\u4e2d...', key: 'pipe', duration: 0 })
+      const res = await fetch(`${SCRIPT_API}/asset-extract-async`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ project_id: projectId, script_text: scriptText }),
       })
-      const tid = res.data?.task_id
+      const data = (await res.json())?.data || {}
+      const tid = data.task_id
       if (!tid) throw new Error('No task_id')
       const result = await pollTask(tid)
-      setDivideResult(result)
-      updateStage('divide', 'done')
-      message.success({ content: '分镜完成', key: 'pipe' })
+      setAssetList(result)
+      updateStage('asset_extract', 'done')
+      message.success({ content: '\u8d44\u4ea7\u63d0\u53d6\u5b8c\u6210', key: 'pipe' })
       await loadStatus()
     } catch (e: any) {
-      updateStage('divide', 'not_started')
-      message.error({ content: e?.message || '分镜失败', key: 'pipe' })
+      updateStage('asset_extract', 'not_started')
+      message.error({ content: e?.message || '\u63d0\u53d6\u5931\u8d25', key: 'pipe' })
     } finally {
       setLoading(false)
     }
   }
 
-  const runExtract = async () => {
-    if (!chapterId || !projectId) return
+  const runDivide = async () => {
+    if (!chapterId || !scriptText) return
     setLoading(true)
-    updateStage('extract', 'running')
+    updateStage('divide', 'running')
     try {
-      message.loading({ content: '元素提取中...', key: 'pipe', duration: 0 })
-      // Get division result - either from state or fetch from backend
+      message.loading({ content: '\u5206\u955c\u63d0\u53d6\u4e2d...', key: 'pipe', duration: 0 })
+      const res = await fetch(`${SCRIPT_API}/divide-async`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ script_text: scriptText, write_to_db: true, chapter_id: chapterId }),
+      })
+      const data = (await res.json())?.data || {}
+      const tid = data.task_id
+      if (!tid) throw new Error('No task_id')
+      const result = await pollTask(tid)
+      setDivideResult(result)
+      updateStage('divide', 'done')
+      message.success({ content: '\u5206\u955c\u5b8c\u6210', key: 'pipe' })
+      await loadStatus()
+    } catch (e: any) {
+      updateStage('divide', 'not_started')
+      message.error({ content: e?.message || '\u5206\u955c\u5931\u8d25', key: 'pipe' })
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const runBindAssets = async () => {
+    if (!chapterId) return
+    setLoading(true)
+    updateStage('bind_assets', 'running')
+    try {
+      message.loading({ content: '\u7ed1\u5b9a\u8d44\u4ea7\u4e2d...', key: 'pipe', duration: 0 })
       let division = divideResult
       if (!division) {
-        // Fetch latest divide task result from backend
         const tasksRes = await fetch(`/api/v1/film/tasks?task_kind=script_divide&page=1&page_size=1`)
         const tasksData = (await tasksRes.json())?.data
         const tasks = tasksData?.items || []
@@ -121,44 +150,39 @@ export default function ChapterPipeline() {
           division = (await resultRes.json())?.data
         }
       }
-      if (!division) throw new Error('No division result found - run divide first')
+      if (!division) throw new Error('\u8bf7\u5148\u5b8c\u6210\u5206\u955c\u63d0\u53d6')
+      let assets = assetList
+      if (!assets) {
+        const tasksRes = await fetch(`/api/v1/film/tasks?task_kind=script_asset_extract&page=1&page_size=1`)
+        const tasksData = (await tasksRes.json())?.data
+        const tasks = tasksData?.items || []
+        const succeededTask = tasks.find((t: any) => t.status === 'succeeded')
+        if (succeededTask) {
+          const resultRes = await fetch(`/api/v1/film/tasks/${succeededTask.id}/result`)
+          assets = (await resultRes.json())?.data?.result || (await resultRes.json())?.data
+        }
+      }
+      if (!assets) throw new Error('\u8bf7\u5148\u5b8c\u6210\u8d44\u4ea7\u63d0\u53d6')
       const divisionData = division?.result || division
-      const extractRes = await ScriptProcessingService.extractScriptAsyncApiV1ScriptProcessingExtractAsyncPost({
-        requestBody: {
-          project_id: projectId,
+      const res = await fetch(`${SCRIPT_API}/bind-assets-async`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
           chapter_id: chapterId,
-          script_division: divisionData,
-          consistency: null,
-        },
+          script_division_json: JSON.stringify(divisionData),
+          asset_list_json: JSON.stringify(assets),
+        }),
       })
-      const tid = extractRes.data?.task_id
+      const data = (await res.json())?.data || {}
+      const tid = data.task_id
       if (!tid) throw new Error('No task_id')
       await pollTask(tid)
-      updateStage('extract', 'done')
-      message.success({ content: '元素提取完成', key: 'pipe' })
+      updateStage('bind_assets', 'done')
+      message.success({ content: '\u8d44\u4ea7\u7ed1\u5b9a\u5b8c\u6210', key: 'pipe' })
       await loadStatus()
     } catch (e: any) {
-      updateStage('extract', 'not_started')
-      message.error({ content: e?.message || '提取失败', key: 'pipe' })
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const runAutoConfirm = async () => {
-    if (!chapterId) return
-    setLoading(true)
-    updateStage('confirm', 'running')
-    try {
-      message.loading({ content: '自动确认候选中...', key: 'pipe', duration: 0 })
-      const res = await fetch(`${API_BASE}/chapters/${chapterId}/auto-confirm`, { method: 'POST' })
-      const data = (await res.json())?.data || {}
-      updateStage('confirm', 'done')
-      message.success({ content: `确认完成: 创建${data.created} 关联${data.linked}`, key: 'pipe' })
-      await loadStatus()
-    } catch (e: any) {
-      updateStage('confirm', 'not_started')
-      message.error({ content: e?.message || '确认失败', key: 'pipe' })
+      updateStage('bind_assets', 'not_started')
+      message.error({ content: e?.message || '\u7ed1\u5b9a\u5931\u8d25', key: 'pipe' })
     } finally {
       setLoading(false)
     }
@@ -176,11 +200,11 @@ export default function ChapterPipeline() {
 
   const statusTag = (status: StageStatus) => {
     const map: Record<string, { color: string; text: string }> = {
-      done: { color: 'green', text: '已完成' },
-      running: { color: 'blue', text: '进行中' },
-      partial: { color: 'orange', text: '部分完成' },
-      not_started: { color: 'default', text: '未开始' },
-      blocked: { color: 'red', text: '阻塞' },
+      done: { color: 'green', text: '\u5df2\u5b8c\u6210' },
+      running: { color: 'blue', text: '\u8fdb\u884c\u4e2d' },
+      partial: { color: 'orange', text: '\u90e8\u5206\u5b8c\u6210' },
+      not_started: { color: 'default', text: '\u672a\u5f00\u59cb' },
+      blocked: { color: 'red', text: '\u963b\u585e' },
     }
     const s = map[status] || map.not_started
     return <Tag color={s.color}>{s.text}</Tag>
@@ -193,17 +217,17 @@ export default function ChapterPipeline() {
   }
 
   const runStage = (key: string) => {
+    if (key === 'asset_extract') return runAssetExtract()
     if (key === 'divide') return runDivide()
-    if (key === 'extract') return runExtract()
-    if (key === 'confirm') return runAutoConfirm()
-    message.info('该阶段请在对应页面操作')
+    if (key === 'bind_assets') return runBindAssets()
+    message.info('\u8be5\u9636\u6bb5\u8bf7\u5728\u5bf9\u5e94\u9875\u9762\u64cd\u4f5c')
   }
 
   return (
     <div className="p-6 max-w-4xl mx-auto">
       <div className="mb-4">
-        <h2 className="text-lg font-semibold">一键制作流程</h2>
-        <p className="text-sm text-gray-500">{chapterTitle ? `章节: ${chapterTitle}` : ''}</p>
+        <h2 className="text-lg font-semibold">{'\u4e00\u952e\u5236\u4f5c\u6d41\u7a0b'}</h2>
+        <p className="text-sm text-gray-500">{chapterTitle ? `\u7ae0\u8282: ${chapterTitle}` : ''}</p>
       </div>
 
       <Card>
@@ -221,13 +245,21 @@ export default function ChapterPipeline() {
                 </div>
               </div>
               <div className="flex items-center gap-2">
+                {stage.key === 'asset_images' && canRun(stage.key) && stage.status !== 'done' && projectId && (
+                  <>
+                    <Link to={`/projects/${projectId}?tab=roles`} target="_blank">
+                      <Button size="small" type="primary">{'\u53bb\u751f\u6210'}</Button>
+                    </Link>
+                    <Button size="small" onClick={() => updateStage('asset_images', 'done')}>{'\u5b8c\u6210'}</Button>
+                  </>
+                )}
                 {stage.key === 'asset_images' && stage.status === 'done' && projectId && (
-                  <Link to={`/projects/${projectId}?tab=roles`}>
-                    <Button size="small" icon={<ReloadOutlined />}>审核资产</Button>
+                  <Link to={`/projects/${projectId}?tab=roles`} target="_blank">
+                    <Button size="small" icon={<ReloadOutlined />}>{'\u5ba1\u6838'}</Button>
                   </Link>
                 )}
-                {stage.key === 'confirm' && stage.status === 'done' && (
-                  <Tag color="green">可审核</Tag>
+                {stage.key === 'bind_assets' && stage.status === 'done' && (
+                  <Tag color="green">{'\u53ef\u5ba1\u6838'}</Tag>
                 )}
                 {stage.actionLabel && stage.status !== 'done' && stage.status !== 'running' && (
                   <Button
@@ -247,20 +279,20 @@ export default function ChapterPipeline() {
           ))}
         </div>
 
-        {stages[0].status === 'done' && stages[2].status === 'done' && (
+        {stages[0].status === 'done' && stages[3].status === 'done' && (
           <Result
             status="info"
-            title="资产已就绪"
-            subTitle="候选已确认，可以去角色/场景管理页生成参考图，然后回到镜头页生成帧图和视频"
+            title={'\u8d44\u4ea7\u5df2\u5c31\u7eea'}
+            subTitle={'\u8d44\u4ea7\u5df2\u63d0\u53d6\u5e76\u7ed1\u5b9a\u5230\u955c\u5934\uff0c\u53ef\u4ee5\u53bb\u955c\u5934\u9875\u751f\u6210\u5e27\u56fe\u548c\u89c6\u9891'}
             extra={[
               projectId ? (
                 <Link to={`/projects/${projectId}?tab=roles`}>
-                  <Button type="primary">去生成角色图</Button>
+                  <Button type="primary">{'\u53bb\u751f\u6210\u89d2\u8272\u56fe'}</Button>
                 </Link>
               ) : null,
               chapterId ? (
                 <Link to={`/projects/${projectId}/chapters/${chapterId}/shots`}>
-                  <Button>去分镜管理</Button>
+                  <Button>{'\u53bb\u5206\u955c\u7ba1\u7406'}</Button>
                 </Link>
               ) : null,
             ]}

@@ -15,7 +15,6 @@ from app.chains.agents import (
     CharacterPortraitAnalysisAgent,
     CostumeInfoAnalysisAgent,
     ScriptDividerAgent,
-    ElementExtractorAgent,
     EntityMergerAgent,
     VariantAnalyzerAgent,
     ConsistencyCheckerAgent,
@@ -31,7 +30,6 @@ from app.chains.agents.script_processing_agents import (
     ScriptConsistencyCheckResult,
     ScriptOptimizationResult,
     ScriptSimplificationResult,
-    StudioScriptExtractionDraft,
 )
 from app.dependencies import get_db, get_llm, get_nothinking_llm
 from app.schemas.common import ApiResponse, success_response
@@ -48,7 +46,6 @@ from app.services.script_processing_tasks import (
     create_consistency_task,
     create_costume_info_task,
     create_divide_task,
-    create_extract_task,
     create_character_portrait_task,
     create_merge_task,
     create_prop_info_task,
@@ -63,7 +60,6 @@ from app.services.script_processing_tasks import (
     spawn_consistency_task,
     spawn_costume_info_task,
     spawn_divide_task,
-    spawn_extract_task,
     spawn_character_portrait_task,
     spawn_merge_task,
     spawn_prop_info_task,
@@ -71,16 +67,6 @@ from app.services.script_processing_tasks import (
     spawn_script_optimization_task,
     spawn_script_simplification_task,
     spawn_variant_task,
-)
-from app.services.script_extraction_cache import (
-    build_script_extract_cache_key,
-    get_cached_script_extract,
-    set_cached_script_extract,
-)
-from app.services.studio.script_division import write_division_result_to_chapter
-from app.services.studio import (
-    sync_shot_extracted_candidates_from_draft,
-    sync_shot_extracted_dialogue_candidates_from_draft,
 )
 from app.services.studio.shot_semantic_defaults import apply_shot_semantic_defaults_from_draft
 from app.api.v1.routes.film.common import AsyncTaskCreateRead
@@ -929,144 +915,54 @@ async def simplify_script_async(
 
 
 # ============================================================================
-# 7. ElementExtractorAgent - 项目级提取（最终输出）
+# Phase 3: Asset extraction & binding (decoupled from script division)
 # ============================================================================
 
-class ScriptExtractRequest(BaseModel):
-    """项目级信息提取请求（最终输出）。"""
-    project_id: str = Field(..., description="项目 ID", min_length=1)
-    chapter_id: str = Field(..., description="章节 ID", min_length=1)
-    script_division: dict[str, Any] = Field(..., description="分镜结果（ScriptDivisionResult 序列化）")
-    consistency: dict[str, Any] | None = Field(None, description="一致性检查结果（可选；ScriptConsistencyCheckResult 序列化）")
-    refresh_cache: bool = Field(False, description="是否跳过后端缓存并强制重新提取")
-
-
-@router.post(
-    "/extract-async",
-    response_model=ApiResponse[AsyncTaskCreateRead],
-    summary="异步项目级信息提取（最终输出）",
-    description="创建项目级信息提取任务并立即返回 task_id；前端可通过任务状态接口轮询。",
-)
-async def extract_script_async(
-    request: ScriptExtractRequest,
-    db: AsyncSession = Depends(get_db),
-) -> ApiResponse[AsyncTaskCreateRead]:
-    task_info = await create_extract_task(
-        db,
-        project_id=request.project_id,
-        chapter_id=request.chapter_id,
-        script_division=request.script_division,
-        consistency=request.consistency,
-        refresh_cache=request.refresh_cache,
-    )
-    await db.commit()
-    if not task_info.reused:
-        spawn_extract_task(task_info.task_id)
-    return success_response(
-        AsyncTaskCreateRead(
-            task_id=task_info.task_id,
-            status=task_info.status,
-            reused=task_info.reused,
-            relation_type=task_info.relation_type,
-            relation_entity_id=task_info.relation_entity_id,
-        )
-    )
-
-
-@router.post(
-    "/extract",
-    response_model=ApiResponse[StudioScriptExtractionDraft],
-    summary="项目级信息提取（最终输出）",
-    description="输入分镜结果（可选带一致性检查结果），输出可导入 Studio 的草稿结构（name-based，ID 由导入接口生成）。当前同步接口主要用于兼容旧调用与调试场景；页面主流程优先使用 extract-async。"
-)
-async def extract_script(
-    request: ScriptExtractRequest,
-    llm: BaseChatModel = Depends(get_nothinking_llm),
-    db: AsyncSession = Depends(get_db),
-) -> ApiResponse[StudioScriptExtractionDraft]:
-    try:
-        cache_key = build_script_extract_cache_key(
-            project_id=request.project_id,
-            chapter_id=request.chapter_id,
-            script_division=request.script_division,
-            consistency=request.consistency,
-        )
-        if not request.refresh_cache:
-            cached = get_cached_script_extract(cache_key)
-            if cached is not None:
-                await sync_shot_extracted_candidates_from_draft(
-                    db,
-                    chapter_id=request.chapter_id,
-                    draft=cached,
-                )
-                await sync_shot_extracted_dialogue_candidates_from_draft(
-                    db,
-                    chapter_id=request.chapter_id,
-                    draft=cached,
-                )
-                await apply_shot_semantic_defaults_from_draft(
-                    db,
-                    chapter_id=request.chapter_id,
-                    draft=cached,
-                )
-                await db.commit()
-                return success_response(data=cached, meta={"from_cache": True})
-
-        agent = ElementExtractorAgent(llm)
-        result = agent.extract(
-            project_id=request.project_id,
-            chapter_id=request.chapter_id,
-            script_division_json=json.dumps(request.script_division, ensure_ascii=False),
-            consistency_json=json.dumps(request.consistency or {}, ensure_ascii=False),
-        )
-        set_cached_script_extract(cache_key, result)
-        await sync_shot_extracted_candidates_from_draft(
-            db,
-            chapter_id=request.chapter_id,
-            draft=result,
-        )
-        await sync_shot_extracted_dialogue_candidates_from_draft(
-            db,
-            chapter_id=request.chapter_id,
-            draft=result,
-        )
-        await apply_shot_semantic_defaults_from_draft(
-            db,
-            chapter_id=request.chapter_id,
-            draft=result,
-        )
-        await db.commit()
-        return success_response(data=result, meta={"from_cache": False})
-    except Exception as e:
-        logger.error(f"Script extraction failed: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to extract script: {str(e)}",
-        )
-
-
-
-# === Phase 3: Decoupled asset extraction + binding endpoints ===
-
-
 class ScriptAssetExtractRequest(BaseModel):
-    """Phase 3: request body for asset-only extraction (no division needed)."""
-    project_id: str = Field(..., description="Project ID", min_length=1)
-    script_text: str = Field(..., description="Full script text", min_length=1)
+    """Phase 3: 项目级资产提取请求体。
+
+    `write_to_db` 与其他 script-processing 接口保持字段对称；asset-extract worker
+    在 ``project_id`` 存在时始终将资产库落库，故该标志当前为保留字段（默认 False）。
+    """
+
+    project_id: str = Field(..., description="项目 ID", min_length=1)
+    script_text: str = Field(..., description="完整剧本文本", min_length=1)
+    write_to_db: bool = Field(
+        False,
+        description="是否将提取结果写入数据库（保留字段，当前由 worker 自动落库）",
+    )
 
 
 class ScriptAssetBindRequest(BaseModel):
-    """Phase 3: request body for asset-to-shot binding."""
-    chapter_id: str = Field(..., description="Chapter ID", min_length=1)
-    script_division: dict[str, Any] = Field(..., description="Division result (ScriptDivisionResult)")
-    asset_list: dict[str, Any] = Field(..., description="Existing assets: {characters: [...], scenes: [...], props: [...], costumes: [...]}")
+    """Phase 3: 资产-镜头绑定请求体。
+
+    字段名 ``script_division_json`` / ``asset_list_json`` 与网关代理契约一致，
+    网关会直接转发预序列化的 JSON 字符串。
+    """
+
+    chapter_id: str = Field(..., description="章节 ID", min_length=1)
+    script_division_json: str = Field(
+        ...,
+        description="分镜结果 JSON 字符串（ScriptDivisionResult 序列化）",
+    )
+    asset_list_json: str = Field(
+        ...,
+        description="已有资产 JSON 字符串：{characters: [...], scenes: [...], props: [...], costumes: [...]}",
+    )
+    write_to_db: bool = Field(
+        False,
+        description="是否将绑定结果写入数据库（保留字段，当前由 worker 自动落库）",
+    )
 
 
 @router.post(
     "/asset-extract-async",
     response_model=ApiResponse[AsyncTaskCreateRead],
-    summary="Phase 3: Extract project-level assets from script text (no division needed)",
-    description="Analyze script text and extract all characters/scenes/props/costumes as project-level entities. Does NOT create shots or bindings.",
+    summary="异步提取项目级资产（角色/场景/道具/服装）",
+    description=(
+        "分析剧本文本，提取全部角色/场景/道具/服装作为项目级实体。"
+        "不依赖分镜，不创建镜头或绑定。创建任务后立即返回 task_id，前端通过任务状态接口轮询。"
+    ),
 )
 async def asset_extract_async(
     request: ScriptAssetExtractRequest,
@@ -1094,19 +990,21 @@ async def asset_extract_async(
 @router.post(
     "/bind-assets-async",
     response_model=ApiResponse[AsyncTaskCreateRead],
-    summary="Phase 3: Bind existing assets to shots",
-    description="Given division result + existing asset list, LLM assigns assets to each shot. Does NOT create new assets.",
+    summary="异步将已有资产绑定到镜头",
+    description=(
+        "给定分镜结果与已有资产列表，由 LLM 为每个镜头分配资产（解析稳定实体 ID），"
+        "不创建新资产。创建任务后立即返回 task_id，前端通过任务状态接口轮询。"
+    ),
 )
 async def bind_assets_async(
     request: ScriptAssetBindRequest,
     db: AsyncSession = Depends(get_db),
 ) -> ApiResponse[AsyncTaskCreateRead]:
-    import json
     task_info = await create_asset_bind_task(
         db,
         chapter_id=request.chapter_id,
-        script_division_json=json.dumps(request.script_division, ensure_ascii=False),
-        asset_list_json=json.dumps(request.asset_list, ensure_ascii=False),
+        script_division_json=request.script_division_json,
+        asset_list_json=request.asset_list_json,
     )
     await db.commit()
     if not task_info.reused:
@@ -1120,3 +1018,4 @@ async def bind_assets_async(
             relation_entity_id=task_info.relation_entity_id,
         )
     )
+

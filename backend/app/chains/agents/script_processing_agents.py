@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 from app.chains.agents.consistency_checker_agent import ConsistencyCheckerAgent
-from app.chains.agents.element_extractor_agent import ElementExtractorAgent
+from app.chains.agents.asset_extractor_agent import AssetExtractorAgent, ShotBinderAgent
 from app.chains.agents.entity_merger_agent import EntityMergerAgent
 from app.chains.agents.script_divider_agent import ScriptDividerAgent
 from app.chains.agents.script_optimizer_agent import ScriptOptimizerAgent
@@ -27,7 +27,8 @@ from app.schemas.skills.script_processing import (
 
 __all__ = [
     "ScriptDividerAgent",
-    "ElementExtractorAgent",
+    "AssetExtractorAgent",
+    "ShotBinderAgent",
     "EntityMergerAgent",
     "VariantAnalyzerAgent",
     "ConsistencyCheckerAgent",
