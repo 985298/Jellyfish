@@ -611,6 +611,9 @@ export function ChapterShotsPage() {
           }}
           extra={
             <Space wrap>
+              <Link to={`/projects/${projectId}/chapters/${chapterId}/pipeline`}>
+                <Button type="primary" icon={<ThunderboltOutlined />}>一键制作</Button>
+              </Link>
               {selectedRowKeys.length > 0 ? (
                 <>
                   <span className="text-gray-500 text-sm">已选 {selectedRowKeys.length} 项</span>
