@@ -122,10 +122,14 @@ async def build_chat_model_from_provider(
             detail=f"No text model configured for provider_id={provider.id}",
         )
 
+    settings_row = await db.get(ModelSettings, 1)
+    api_timeout = (settings_row.api_timeout if settings_row and settings_row.api_timeout else 30) or 30
+
     return _build_chat_openai_model(
         provider=provider,
         model=model,
         thinking=True,
+        timeout=api_timeout,
         import_error_detail="Install langchain-openai to build chat model from provider config",
     )
 
@@ -138,10 +142,13 @@ async def build_default_text_llm(
     """基于默认文本模型构造 ChatOpenAI。"""
     model = await get_default_model_by_category(db, ModelCategoryKey.text)
     provider = await get_provider_by_model_or_id(db, model)
+    settings_row = await db.get(ModelSettings, 1)
+    api_timeout = (settings_row.api_timeout if settings_row and settings_row.api_timeout else 30) or 30
     return _build_chat_openai_model(
         provider=provider,
         model=model,
         thinking=thinking,
+        timeout=api_timeout,
         import_error_detail="Install langchain-openai (e.g. uv sync --group dev) to use film extraction endpoints",
     )
 
@@ -151,6 +158,7 @@ def _build_chat_openai_model(
     provider: Provider,
     model: Model,
     thinking: bool,
+    timeout: int = 30,
     import_error_detail: str,
 ) -> BaseChatModel:
     api_key = (provider.api_key or "").strip()
@@ -172,6 +180,8 @@ def _build_chat_openai_model(
     kwargs["model"] = model.name
     kwargs["api_key"] = api_key
     kwargs.setdefault("temperature", 0)
+    kwargs.setdefault("timeout", timeout)
+    kwargs.setdefault("max_retries", 0)
 
     base_url = resolve_effective_base_url(provider=provider, category=ModelCategoryKey.text)
     if base_url:

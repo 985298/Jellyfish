@@ -142,8 +142,7 @@ class AgentBase(ABC, Generic[T]):
         structured_output_method: str = STRUCTURED_OUTPUT_METHOD,
         agent_kwargs: dict[str, Any] | None = None,
     ) -> None:
-        self._model = model
-        self._model.bind(extra_body={"enable_thinking": self.enable_thinking})
+        self._model = model.bind(extra_body={"enable_thinking": self.enable_thinking})
         self._structured_output_method = structured_output_method
         self._agent_kwargs = dict(agent_kwargs or {})
         self._structured_chain: Runnable | None = None
@@ -291,15 +290,25 @@ class AgentBase(ABC, Generic[T]):
 
     def run(self, **kwargs: Any) -> str:
         """调用 agent，返回原始字符串（通常为 JSON）。"""
-        chain: Runnable = self.create_agent()
-        result = chain.invoke(kwargs)
-        return self._last_message_content(result)
+        from langchain_core.messages import SystemMessage, HumanMessage
+        messages = []
+        sys = (self.system_prompt or "").strip()
+        if sys:
+            messages.append(SystemMessage(content=sys))
+        messages.append(HumanMessage(content=self._render_user_prompt(**kwargs)))
+        result = self._model.invoke(messages)
+        return result.content if hasattr(result, "content") else str(result)
 
     async def arun(self, **kwargs: Any) -> str:
         """异步调用 agent。"""
-        chain: Runnable = self.create_agent()
-        result = await chain.ainvoke(kwargs)
-        return self._last_message_content(result)
+        from langchain_core.messages import SystemMessage, HumanMessage
+        messages = []
+        sys = (self.system_prompt or "").strip()
+        if sys:
+            messages.append(SystemMessage(content=sys))
+        messages.append(HumanMessage(content=self._render_user_prompt(**kwargs)))
+        result = await self._model.ainvoke(messages)
+        return result.content if hasattr(result, "content") else str(result)
 
     def format_output(self, raw: str) -> T:
         """将 agent 原始输出解析为结构化结果（JSON → 规范化 → Pydantic）。"""
@@ -312,32 +321,8 @@ class AgentBase(ABC, Generic[T]):
 
     def extract(self, **kwargs: Any) -> T:
         """执行：优先 with_structured_output，否则 run + format_output。"""
-        chain = self._get_structured_chain()
-        if chain is not None:
-            try:
-                state = chain.invoke(kwargs)
-                result = self._extract_structured_response(state)
-                if isinstance(result, self.output_model):
-                    return cast(T, result)
-                if isinstance(result, dict):
-                    data = self._normalize(result)
-                    return self.output_model.model_validate(data)
-            except Exception:
-                pass
         return self.format_output(self.run(**kwargs))
 
     async def aextract(self, **kwargs: Any) -> T:
         """异步执行。"""
-        chain = self._get_structured_chain()
-        if chain is not None:
-            try:
-                state = await chain.ainvoke(kwargs)
-                result = self._extract_structured_response(state)
-                if isinstance(result, self.output_model):
-                    return cast(T, result)
-                if isinstance(result, dict):
-                    data = self._normalize(result)
-                    return self.output_model.model_validate(data)
-            except Exception:
-                pass
         return self.format_output(await self.arun(**kwargs))

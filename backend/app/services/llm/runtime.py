@@ -59,10 +59,15 @@ def build_default_text_llm_sync(
     except ImportError as e:
         raise HTTPException(status_code=503, detail="Install langchain-openai to enable script-processing tasks") from e
 
+    settings_row = db.get(ModelSettings, 1)
+    api_timeout = (settings_row.api_timeout if settings_row and settings_row.api_timeout else 30) or 30
+
     kwargs: dict[str, Any] = dict(model.params or {})
     kwargs["model"] = model.name
     kwargs["api_key"] = api_key
     kwargs.setdefault("temperature", 0)
+    kwargs.setdefault("timeout", api_timeout)
+    kwargs.setdefault("max_retries", 0)
 
     base_url = resolve_effective_base_url(provider=provider, category=ModelCategoryKey.text)
     if base_url:
