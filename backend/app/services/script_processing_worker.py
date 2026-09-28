@@ -197,7 +197,7 @@ class ExtractTaskExecutor(AbstractWorkerTaskExecutor):
 class ConsistencyTaskExecutor(AbstractWorkerTaskExecutor):
     task_kind = "script_consistency"
     succeeded_progress = 100
-    timeout_seconds = 900.0
+    timeout_seconds = 300.0
 
     def __init__(self) -> None:
         super().__init__(session_maker=sync_session_maker)
@@ -209,7 +209,7 @@ class ConsistencyTaskExecutor(AbstractWorkerTaskExecutor):
 
 class _SimpleLLMTaskExecutor(AbstractWorkerTaskExecutor):
     succeeded_progress = 100
-    timeout_seconds = 900.0
+    timeout_seconds = 300.0
     generator_class: type[AbstractLLMResultGenerator]
 
     def __init__(self) -> None:

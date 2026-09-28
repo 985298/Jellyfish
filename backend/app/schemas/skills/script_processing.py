@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.models.studio import CameraAngle, CameraMovement, CameraShotType
 from app.schemas.skills.common import DialogueLine, DialogueLineMode, EvidenceSpan
@@ -25,7 +25,25 @@ class ShotDivision(BaseModel):
     script_excerpt: str = Field(..., description="镜头对应的剧本摘录/文本")
 
     shot_name: str = Field("", description="镜头名称（分镜名/镜头标题）")
-    time_of_day: Optional[SceneTimeLoose] = Field(None, description="时间（日/夜/未知等，可选）")
+    time_of_day: Optional[str] = Field(None, description="时间（日/夜/未知等，可选）")
+
+    @field_validator("time_of_day", mode="before")
+    @classmethod
+    def normalize_time_of_day(cls, v):
+        """Normalize time_of_day to known enum values, handling encoding variants."""
+        if v is None or v == "":
+            return None
+        s = str(v).strip()
+        lower = s.lower()
+        mapping = {"day": "DAY", "night": "NIGHT", "dawn": "DAWN", "dusk": "DUSK", "unknown": "UNKNOWN"}
+        if lower in mapping:
+            return mapping[lower]
+        for cn, std in [("日", "DAY"), ("夜", "NIGHT"), ("黎明", "DAWN"), ("黄昏", "DUSK"), ("傍晚", "DUSK"), ("不明", "UNKNOWN"), ("未知", "UNKNOWN")]:
+            if cn in s:
+                return std
+        if s in ("DAY", "NIGHT", "DAWN", "DUSK", "UNKNOWN"):
+            return s
+        return "UNKNOWN"
 
 
 class ScriptDivisionResult(BaseModel):
