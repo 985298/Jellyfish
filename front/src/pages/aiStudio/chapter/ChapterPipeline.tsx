@@ -75,6 +75,193 @@ export default function ChapterPipeline() {
     throw new Error('Timeout')
   }
 
+
+  const runAssetExtract = async () => {
+    if (!chapterId || !projectId || !scriptText) return
+    setLoading(true)
+    updateStage('asset_extract', 'running')
+    try {
+      message.loading({ content: '资产提取中...', key: 'pipe', duration: 0 })
+      const res = await ScriptProcessingService.extractScriptAsyncApiV1ScriptProcessingExtractAsyncPost... 
+      // Actually use fetch for the new endpoint
+      const r = await fetch('/api/v1/script-processing/asset-extract-async', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ project_id: projectId, script_text: scriptText }),
+      })
+      const data = await r.json()
+      const tid = data?.data?.task_id
+      if (!tid) throw new Error('No task_id')
+      await pollTask(tid)
+      updateStage('asset_extract', 'done')
+      message.success({ content: '资产提取完成', key: 'pipe' })
+    } catch (e: any) {
+      updateStage('asset_extract', 'not_started')
+      message.error({ content: e?.message || '提取失败', key: 'pipe' })
+      return
+    } finally {
+      setLoading(false)
+    }
+    // Auto-chain: start asset images
+    await runAssetImages()
+  }
+
+  const runAssetImages = async () => {
+    if (!projectId) return
+    setLoading(true)
+    updateStage('asset_images', 'running')
+    try {
+      message.loading({ content: '获取资产列表...', key: 'pipe', duration: 0 })
+      // Get all characters for the project
+      const r = await fetch(`/api/v1/studio/entities/character?project_id=${projectId}`)
+      const charsData = await r.json()
+      const chars = charsData?.data?.items || charsData?.items || []
+      if (!chars.length) {
+        updateStage('asset_images', 'done')
+        message.info({ content: '没有角色需要生成图片', key: 'pipe' })
+        return
+      }
+      message.loading({ content: `批量生成 ${chars.length} 个角色图片...`, key: 'pipe', duration: 0 })
+      const taskIds: string[] = []
+      for (const char of chars) {
+        try {
+          const imgR = await fetch(`/api/v1/studio/image-tasks/characters/${char.id}/image-tasks`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ image_id: char.character_images?.[0]?.id || 1, prompt: char.description || char.name }),
+          })
+          const imgData = await imgR.json()
+          if (imgData?.data?.task_id) taskIds.push(imgData.data.task_id)
+        } catch {}
+      }
+      // Poll all tasks
+      let completed = 0
+      const failed: string[] = []
+      for (const tid of taskIds) {
+        try {
+          await pollTask(tid)
+          completed++
+          message.loading({ content: `图片生成 ${completed}/${taskIds.length}`, key: 'pipe', duration: 0 })
+        } catch {
+          failed.push(tid)
+        }
+      }
+      updateStage('asset_images', 'done')
+      message.success({ content: `图片完成 ${completed}/${taskIds.length}${failed.length ? ' 失败' + failed.length : ''}`, key: 'pipe' })
+    } catch (e: any) {
+      updateStage('asset_images', 'not_started')
+      message.error({ content: e?.message || '生成失败', key: 'pipe' })
+      return
+    } finally {
+      setLoading(false)
+    }
+    // Auto-chain: start divide
+    await runDivide()
+  }
+
+  const runBind = async () => {
+    if (!chapterId || !projectId) return
+    setLoading(true)
+    updateStage('bind', 'running')
+    try {
+      message.loading({ content: '批量绑定资产...', key: 'pipe', duration: 0 })
+      const r = await fetch('/api/v1/studio/chapters/' + chapterId + '/auto-confirm', { method: 'POST' })
+      const data = await r.json()?.data || {}
+      updateStage('bind', 'done')
+      message.success({ content: `绑定完成: 创建${data.created||0} 关联${data.linked||0}`, key: 'pipe' })
+    } catch (e: any) {
+      updateStage('bind', 'not_started')
+      message.error({ content: e?.message || '绑定失败', key: 'pipe' })
+      return
+    } finally {
+      setLoading(false)
+    }
+    // Auto-chain: start keyframes
+    await runKeyframes()
+  }
+
+  const runKeyframes = async () => {
+    if (!chapterId) return
+    setLoading(true)
+    updateStage('keyframes', 'running')
+    try {
+      message.loading({ content: '获取镜头列表...', key: 'pipe', duration: 0 })
+      const r = await fetch(`/api/v1/studio/shots?chapter_id=${chapterId}`)
+      const shotsData = await r.json()
+      const shots = shotsData?.data?.items || shotsData?.items || []
+      if (!shots.length) {
+        updateStage('keyframes', 'done')
+        return
+      }
+      message.loading({ content: `批量生成 ${shots.length} 个帧图...`, key: 'pipe', duration: 0 })
+      const taskIds: string[] = []
+      for (const shot of shots) {
+        try {
+          const fr = await fetch(`/api/v1/studio/image-tasks/shot/${shot.id}/frame-image-tasks`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ frame_type: 'first', model_id: null }),
+          })
+          const fd = await fr.json()
+          if (fd?.data?.task_id) taskIds.push(fd.data.task_id)
+        } catch {}
+      }
+      let completed = 0
+      for (const tid of taskIds) {
+        try { await pollTask(tid); completed++; message.loading({ content: `帧图 ${completed}/${taskIds.length}`, key: 'pipe', duration: 0 }) } catch {}
+      }
+      updateStage('keyframes', 'done')
+      message.success({ content: `帧图完成 ${completed}/${taskIds.length}`, key: 'pipe' })
+    } catch (e: any) {
+      updateStage('keyframes', 'not_started')
+      message.error({ content: e?.message || '生成失败', key: 'pipe' })
+      return
+    } finally {
+      setLoading(false)
+    }
+    // Auto-chain: start videos
+    await runVideos()
+  }
+
+  const runVideos = async () => {
+    if (!chapterId) return
+    setLoading(true)
+    updateStage('videos', 'running')
+    try {
+      message.loading({ content: '获取镜头列表...', key: 'pipe', duration: 0 })
+      const r = await fetch(`/api/v1/studio/shots?chapter_id=${chapterId}`)
+      const shotsData = await r.json()
+      const shots = shotsData?.data?.items || shotsData?.items || []
+      if (!shots.length) { updateStage('videos', 'done'); return }
+      message.loading({ content: `批量生成 ${shots.length} 个视频...`, key: 'pipe', duration: 0 })
+      const taskIds: string[] = []
+      for (const shot of shots) {
+        try {
+          const vr = await fetch('/api/v1/film/tasks/video', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ shot_id: shot.id, reference_mode: 'text_only', ratio: '16:9', prompt: shot.title || 'scene' }),
+          })
+          const vd = await vr.json()
+          if (vd?.data?.task_id) taskIds.push(vd.data.task_id)
+        } catch {}
+      }
+      let completed = 0
+      for (const tid of taskIds) {
+        try { await pollTask(tid); completed++; message.loading({ content: `视频 ${completed}/${taskIds.length}`, key: 'pipe', duration: 0 }) } catch {}
+      }
+      updateStage('videos', 'done')
+      message.success({ content: `视频完成 ${completed}/${taskIds.length}`, key: 'pipe' })
+    } catch (e: any) {
+      updateStage('videos', 'not_started')
+      message.error({ content: e?.message || '生成失败', key: 'pipe' })
+      return
+    } finally {
+      setLoading(false)
+    }
+  }
+
+
   const updateStage = (key: string, status: StageStatus) => {
     setStages(prev => prev.map(s => s.key === key ? { ...s, status } : s))
   }
@@ -218,7 +405,12 @@ export default function ChapterPipeline() {
 
   const runStage = (key: string) => {
     if (key === 'asset_extract') return runAssetExtract()
+    if (key === 'asset_extract') return runAssetExtract()
+    if (key === 'asset_images') return runAssetImages()
     if (key === 'divide') return runDivide()
+    if (key === 'bind') return runBind()
+    if (key === 'keyframes') return runKeyframes()
+    if (key === 'videos') return runVideos()
     if (key === 'bind_assets') return runBindAssets()
     message.info('\u8be5\u9636\u6bb5\u8bf7\u5728\u5bf9\u5e94\u9875\u9762\u64cd\u4f5c')
   }
