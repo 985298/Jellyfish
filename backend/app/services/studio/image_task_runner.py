@@ -3,6 +3,10 @@ from __future__ import annotations
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 from app.core.db import async_session_maker
 from app.core.task_manager import DeliveryMode, SqlAlchemyTaskStore, TaskManager
 from app.core.task_manager.types import TaskStatus
@@ -73,14 +77,19 @@ async def _persist_images_to_assets(
     if not item.url and not b64_data:
         return
 
-    file_obj = await create_file_from_url_or_b64(
-        session,
-        url=item.url,
-        b64_data=b64_data,
-        name=f"{relation_type}-{relation_entity_id}",
-        prefix=f"generated-images/{relation_type}/{relation_entity_id}",
-    )
-    file_id = file_obj.id
+    try:
+        file_obj = await create_file_from_url_or_b64(
+            session,
+            url=item.url,
+            b64_data=b64_data,
+            name=f"{relation_type}-{relation_entity_id}",
+            prefix=f"generated-images/{relation_type}/{relation_entity_id}",
+        )
+        file_id = file_obj.id
+        logger.info(f"Image persisted: file_id={file_id} for {relation_type}:{relation_entity_id}")
+    except Exception as e:
+        logger.error(f"Failed to persist image for {relation_type}:{relation_entity_id}: {e}")
+        return
 
     link_stmt = (
         select(GenerationTaskLink)
@@ -94,6 +103,12 @@ async def _persist_images_to_assets(
     link_row = (await session.execute(link_stmt)).scalars().first()
     if link_row is not None:
         link_row.file_id = file_id
+
+    try:
+        await session.commit()
+    except Exception as e:
+        logger.error(f"Failed to commit image persistence: {e}")
+        await session.rollback()
 
     if relation_type == "actor_image":
         image_row = await session.get(ActorImage, int(relation_entity_id))
