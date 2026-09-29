@@ -84,10 +84,9 @@ async def _persist_images_to_assets(
         from app.models.studio_prompts_files_timeline import FileItem
         file_obj = FileItem(
             id=str(uuid.uuid4()),
+            type="image",
             name=f"{relation_type}-{relation_entity_id}",
-            storage_key=item.url,  # Store the original URL directly
-            mime_type="image/png",
-            source="generated",
+            storage_key=item.url,
         )
         session.add(file_obj)
         await session.flush()
