@@ -265,7 +265,6 @@ export default function ChapterPipeline() {
     setStages(prev => prev.map(s => s.key === key ? { ...s, status } : s))
   }
 
-  }
 
   const runDivide = async () => {
     if (!chapterId || !scriptText) return
@@ -294,7 +293,7 @@ export default function ChapterPipeline() {
     }
   }
 
-  const runBindAssets = async () => {
+  const runBind = async () => {
     if (!chapterId) return
     setLoading(true)
     updateStage('bind_assets', 'running')
@@ -379,13 +378,12 @@ export default function ChapterPipeline() {
 
   const runStage = (key: string) => {
     if (key === 'asset_extract') return runAssetExtract()
-    if (key === 'asset_extract') return runAssetExtract()
     if (key === 'asset_images') return runAssetImages()
     if (key === 'divide') return runDivide()
     if (key === 'bind') return runBind()
     if (key === 'keyframes') return runKeyframes()
     if (key === 'videos') return runVideos()
-    if (key === 'bind_assets') return runBindAssets()
+    if (key === 'bind_assets') return runBind()
     message.info('\u8be5\u9636\u6bb5\u8bf7\u5728\u5bf9\u5e94\u9875\u9762\u64cd\u4f5c')
   }
 
