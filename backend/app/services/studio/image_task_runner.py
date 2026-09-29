@@ -78,15 +78,21 @@ async def _persist_images_to_assets(
         return
 
     try:
-        file_obj = await create_file_from_url_or_b64(
-            session,
-            url=item.url,
-            b64_data=b64_data,
+        # Skip download - create FileItem directly with the URL as storage_key
+        # This avoids timeout/expiry issues with temporary image URLs
+        import uuid
+        from app.models.studio_prompts_files_timeline import FileItem
+        file_obj = FileItem(
+            id=str(uuid.uuid4()),
             name=f"{relation_type}-{relation_entity_id}",
-            prefix=f"generated-images/{relation_type}/{relation_entity_id}",
+            storage_key=item.url,  # Store the original URL directly
+            mime_type="image/png",
+            source="generated",
         )
+        session.add(file_obj)
+        await session.flush()
         file_id = file_obj.id
-        logger.info(f"Image persisted: file_id={file_id} for {relation_type}:{relation_entity_id}")
+        logger.info(f"Image persisted (URL mode): file_id={file_id} for {relation_type}:{relation_entity_id}")
     except Exception as e:
         logger.error(f"Failed to persist image for {relation_type}:{relation_entity_id}: {e}")
         return
