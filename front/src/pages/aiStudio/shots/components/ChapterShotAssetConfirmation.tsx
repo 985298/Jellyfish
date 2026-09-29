@@ -1,4 +1,4 @@
-import { Button, Tag, Tooltip } from 'antd'
+import { Button, Checkbox, Tag, Tooltip } from 'antd'
 import { DisplayImageCard } from '../../assets/components/DisplayImageCard'
 import { resolveAssetUrl } from '../../assets/utils'
 import type {
@@ -30,6 +30,11 @@ type ChapterShotAssetConfirmationProps = {
   onToggleExpanded: (kind: AssetKind) => void
   onIgnoreCandidate: (asset: AssetVM) => void
   onHandleNewAsset: (asset: AssetVM) => void
+  selectedAssets?: Set<string>
+  onToggleSelect?: (key: string, checked: boolean) => void
+  onSelectAll?: (checked: boolean) => void
+  onBatchGenerate?: () => void
+  batchLoading?: boolean
 }
 
 function assetDetailUrl(kind: AssetKind, id: string, projectId: string) {
@@ -40,6 +45,11 @@ function assetDetailUrl(kind: AssetKind, id: string, projectId: string) {
 }
 
 export function ChapterShotAssetConfirmation({
+  selectedAssets,
+  onToggleSelect,
+  onSelectAll,
+  onBatchGenerate,
+  batchLoading,
   projectId,
   extraction,
   unionAssets,
@@ -50,6 +60,8 @@ export function ChapterShotAssetConfirmation({
   onIgnoreCandidate,
   onHandleNewAsset,
 }: ChapterShotAssetConfirmationProps) {
+  const allAssets = Object.values(unionAssets).flat()
+  const allSelected = allAssets.length > 0 && allAssets.every(a => selectedAssets?.has(`${a.kind}:${a.name}`))
   const pendingCount = Object.values(unionAssets).reduce(
     (sum, items) => sum + items.filter((item) => item.status === 'new').length,
     0,
@@ -116,7 +128,13 @@ export function ChapterShotAssetConfirmation({
         <div className="text-[11px] text-gray-500">当前镜头已关联</div>
       )
     return (
-      <div key={`${asset.kind}:${asset.name}`} className="col-span-12 md:col-span-6 xl:col-span-3 2xl:col-span-2">
+      <div key={`${asset.kind}:${asset.name}`} className="col-span-12 md:col-span-6 xl:col-span-3 2xl:col-span-2 relative">
+        <div className="absolute top-1 left-1 z-10">
+          <Checkbox
+            checked={selectedAssets?.has(`${asset.kind}:${asset.name}`) || false}
+            onChange={(e) => onToggleSelect?.(`${asset.kind}:${asset.name}`, e.target.checked)}
+          />
+        </div> className="col-span-12 md:col-span-6 xl:col-span-3 2xl:col-span-2">
         <DisplayImageCard
           title={
             <div className="flex items-center justify-between gap-2 min-w-0">
@@ -218,6 +236,20 @@ export function ChapterShotAssetConfirmation({
   return (
     <div className="space-y-4 rounded-xl border border-slate-200 bg-white/80 px-4 py-4">
       <div className="flex items-center justify-between gap-2 mb-2">
+        <div className="flex items-center gap-2">
+          <Checkbox
+            checked={allSelected}
+            indeterminate={selectedAssets && selectedAssets.size > 0 && !allSelected}
+            onChange={(e) => onSelectAll?.(e.target.checked)}
+          >
+            {'\u5168\u9009'}
+          </Checkbox>
+          {selectedAssets && selectedAssets.size > 0 && (
+            <Button size="small" type="primary" loading={batchLoading} onClick={() => onBatchGenerate?.()}>
+              {'\u6279\u91cf\u751f\u6210\u56fe\u7247'} ({selectedAssets.size})
+            </Button>
+          )}
+        </div>
         <div>
           <div className="flex items-center gap-2 flex-wrap">
             <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-slate-900 px-1.5 text-[11px] font-semibold text-white">
