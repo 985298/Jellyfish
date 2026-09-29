@@ -54,6 +54,9 @@
 
 .cs-main {
   background: var(--cs-main-bg);
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .cs-right {
