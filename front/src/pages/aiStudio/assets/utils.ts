@@ -29,6 +29,10 @@ export function resolveAssetUrl(value?: string | null): string | undefined {
   }
 
   try {
+    // OpenAPI.BASE 为空串时走同源（Vite 代理），避免直连后端导致 CORS
+    if (!OpenAPI.BASE) {
+      return new URL(trimmed, window.location.origin).toString()
+    }
     const fallbackBase =
       window.__ENV?.BACKEND_URL ||
       import.meta.env.VITE_BACKEND_URL ||
