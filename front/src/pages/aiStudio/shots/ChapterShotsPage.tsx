@@ -121,6 +121,8 @@ export function ChapterShotsPage() {
   const [loadingChapter, setLoadingChapter] = useState(false)
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [batchDeleting, setBatchDeleting] = useState(false)
+  const [batchFrameLoading, setBatchFrameLoading] = useState(false)
+  const [batchVideoLoading, setBatchVideoLoading] = useState(false)
   const [createOpen, setCreateOpen] = useState(false)
   const [createSubmitting, setCreateSubmitting] = useState(false)
   const [createForm] = Form.useForm<{ title: string; script_excerpt?: string }>()
@@ -362,6 +364,53 @@ export function ChapterShotsPage() {
     },
     [],
   )
+
+
+  const handleBatchGenerateFrames = async () => {
+    if (selectedRowKeys.length === 0) return
+    setBatchFrameLoading(true)
+    try {
+      let submitted = 0
+      for (const shotId of selectedRowKeys) {
+        try {
+          await fetch(`/api/v1/studio/image-tasks/shot/${shotId}/frame-image-tasks`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ frame_type: 'first', model_id: null }),
+          })
+          submitted++
+        } catch {}
+      }
+      message.success(`\u5df2\u63d0\u4ea4 ${submitted}/${selectedRowKeys.length} \u4e2a\u5e27\u56fe\u751f\u6210\u4efb\u52a1`)
+    } catch {
+      message.error('\u6279\u91cf\u751f\u6210\u5e27\u56fe\u5931\u8d25')
+    } finally {
+      setBatchFrameLoading(false)
+    }
+  }
+
+  const handleBatchGenerateVideos = async () => {
+    if (selectedRowKeys.length === 0) return
+    setBatchVideoLoading(true)
+    try {
+      let submitted = 0
+      for (const shotId of selectedRowKeys) {
+        try {
+          await fetch('/api/v1/film/tasks/video', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ shot_id: shotId, reference_mode: 'text_only', ratio: '16:9', prompt: '' }),
+          })
+          submitted++
+        } catch {}
+      }
+      message.success(`\u5df2\u63d0\u4ea4 ${submitted}/${selectedRowKeys.length} \u4e2a\u89c6\u9891\u751f\u6210\u4efb\u52a1`)
+    } catch {
+      message.error('\u6279\u91cf\u751f\u6210\u89c6\u9891\u5931\u8d25')
+    } finally {
+      setBatchVideoLoading(false)
+    }
+  }
 
   const handleBatchDelete = useCallback(async () => {
     if (selectedShotIds.length === 0) return
@@ -630,6 +679,22 @@ export function ChapterShotsPage() {
                       批量删除
                     </Button>
                   </Popconfirm>
+                  <Button
+                    icon={<VideoCameraOutlined />}
+                    loading={batchFrameLoading}
+                    disabled={extracting || batchDeleting || batchVideoLoading}
+                    onClick={() => void handleBatchGenerateFrames()}
+                  >
+                    {'\u6279\u91cf\u5e27\u56fe'}
+                  </Button>
+                  <Button
+                    icon={<VideoCameraOutlined />}
+                    loading={batchVideoLoading}
+                    disabled={extracting || batchDeleting || batchFrameLoading}
+                    onClick={() => void handleBatchGenerateVideos()}
+                  >
+                    {'\u6279\u91cf\u89c6\u9891'}
+                  </Button>
                 </>
               ) : null}
               <Tooltip
