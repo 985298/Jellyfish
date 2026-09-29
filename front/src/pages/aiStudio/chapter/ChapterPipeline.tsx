@@ -82,7 +82,6 @@ export default function ChapterPipeline() {
     updateStage('asset_extract', 'running')
     try {
       message.loading({ content: '资产提取中...', key: 'pipe', duration: 0 })
-      const res = await ScriptProcessingService.extractScriptAsyncApiV1ScriptProcessingExtractAsyncPost... 
       // Actually use fetch for the new endpoint
       const r = await fetch('/api/v1/script-processing/asset-extract-async', {
         method: 'POST',
