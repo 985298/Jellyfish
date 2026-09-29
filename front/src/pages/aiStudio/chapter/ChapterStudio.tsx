@@ -2412,7 +2412,7 @@ const ChapterStudio: React.FC = () => {
         />
 
         {/* 中央：主预览区 */}
-        <Content className="cs-main min-w-0 min-h-0 flex flex-col" style={{ padding: 16, position: 'relative', overflow: 'hidden' }}>
+        <Content className="cs-main min-w-0 min-h-0 flex flex-col" style={{ padding: 16, position: 'relative', overflow: 'auto' }}>
           <Card
             title={
               <div className="flex items-center gap-3 min-w-0">
