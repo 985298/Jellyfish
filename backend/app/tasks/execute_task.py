@@ -31,7 +31,26 @@ def _record_executor_dispatch(task_id: str, *, executor_type: str, executor_task
 
 
 def enqueue_task_execution(task_id: str) -> AsyncResult:
-    async_result = run_task_celery.delay(task_id)
+    # 检测 Celery worker 是否在线；不在线则回退到进程内后台线程执行
+    try:
+        inspect = celery_app.control.inspect(timeout=1)
+        ping_result = inspect.ping()
+        if not ping_result:
+            raise RuntimeError("No Celery worker responding")
+        async_result = run_task_celery.delay(task_id)
+    except Exception as exc:
+        logger.warning("Celery dispatch failed for task %s: %s — falling back to in-process execution", task_id, exc)
+        import threading
+        def _bg_run() -> None:
+            try:
+                run_task_celery(task_id)
+            except Exception:
+                logger.exception("in-process task execution failed: task_id=%s", task_id)
+        t = threading.Thread(target=_bg_run, daemon=True)
+        t.start()
+        _record_executor_dispatch(task_id, executor_type="in_process", executor_task_id=None)
+        return AsyncResult(task_id, app=celery_app)
+
     _record_executor_dispatch(
         task_id,
         executor_type="celery",
