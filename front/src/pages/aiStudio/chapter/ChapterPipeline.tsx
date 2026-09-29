@@ -158,27 +158,6 @@ export default function ChapterPipeline() {
     await runDivide()
   }
 
-  const runBind = async () => {
-    if (!chapterId || !projectId) return
-    setLoading(true)
-    updateStage('bind', 'running')
-    try {
-      message.loading({ content: '批量绑定资产...', key: 'pipe', duration: 0 })
-      const r = await fetch('/api/v1/studio/chapters/' + chapterId + '/auto-confirm', { method: 'POST' })
-      const data = await r.json()?.data || {}
-      updateStage('bind', 'done')
-      message.success({ content: `绑定完成: 创建${data.created||0} 关联${data.linked||0}`, key: 'pipe' })
-    } catch (e: any) {
-      updateStage('bind', 'not_started')
-      message.error({ content: e?.message || '绑定失败', key: 'pipe' })
-      return
-    } finally {
-      setLoading(false)
-    }
-    // Auto-chain: start keyframes
-    await runKeyframes()
-  }
-
   const runKeyframes = async () => {
     if (!chapterId) return
     setLoading(true)
