@@ -269,6 +269,7 @@ export default function ChapterPipeline() {
       message.error({ content: e?.message || '\u5206\u955c\u5931\u8d25', key: 'pipe' })
     } finally {
       setLoading(false)
+    await runBind()
     }
   }
 
@@ -324,6 +325,7 @@ export default function ChapterPipeline() {
       message.error({ content: e?.message || '\u7ed1\u5b9a\u5931\u8d25', key: 'pipe' })
     } finally {
       setLoading(false)
+    await runKeyframes()
     }
   }
 
@@ -368,9 +370,16 @@ export default function ChapterPipeline() {
 
   return (
     <div className="p-6 max-w-4xl mx-auto">
-      <div className="mb-4">
-        <h2 className="text-lg font-semibold">{'\u4e00\u952e\u5236\u4f5c\u6d41\u7a0b'}</h2>
-        <p className="text-sm text-gray-500">{chapterTitle ? `\u7ae0\u8282: ${chapterTitle}` : ''}</p>
+      <div className="mb-4 flex items-center justify-between">
+        <div>
+          <h2 className="text-lg font-semibold">{'\u4e00\u952e\u5236\u4f5c\u6d41\u7a0b'}</h2>
+          <p className="text-sm text-gray-500">{chapterTitle ? `\u7ae0\u8282: ${chapterTitle}` : ''}</p>
+        </div>
+        <Button type="primary" size="large" loading={loading}
+          disabled={stages.every(s => s.status === 'done')}
+          onClick={() => void runAssetExtract()}>
+          {'\u4e00\u952e\u5f00\u59cb'}
+        </Button>
       </div>
 
       <Card>
