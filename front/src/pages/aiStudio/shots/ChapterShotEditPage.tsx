@@ -709,53 +709,8 @@ export function ChapterShotEditPage() {
 
     window.addEventListener('message', handleMessage)
     window.addEventListener('focus', handleFocus)
- 
- const toggleAssetSelect = useCallback((key: string, checked: boolean) => {
-   setSelectedAssets(prev => {
-     const next = new Set(prev)
-     if (checked) next.add(key)
-     else next.delete(key)
-     return next
-   })
- }, [])
 
- const selectAllAssets = useCallback((checked: boolean) => {
-   if (checked) {
-     const all = new Set<string>()
-     Object.values(unionAssets || {}).flat().forEach((a: any) => all.add(`${a.kind}:${a.name}`))
-     setSelectedAssets(all)
-   } else {
-     setSelectedAssets(new Set())
-   }
- }, [unionAssets])
-
- const batchGenerateAssetImages = useCallback(async () => {
-   if (selectedAssets.size === 0) return
-   setBatchAssetLoading(true)
-   try {
-     let submitted = 0
-     for (const key of selectedAssets) {
-       const [kind, ...nameParts] = key.split(':')
-       const name = nameParts.join(':')
-       const entityType = kind === 'actor' ? 'character' : kind
-       try {
-         await fetch(`/api/v1/studio/image-tasks/${entityType}s`, {
-           method: 'POST',
-           headers: { 'Content-Type': 'application/json' },
-           body: JSON.stringify({ name, prompt: name }),
-         })
-         submitted++
-       } catch {}
-     }
-     message.success(`\u5df2\u63d0\u4ea4 ${submitted}/${selectedAssets.size} \u4e2a\u56fe\u7247\u751f\u6210\u4efb\u52a1`)
-   } catch {
-     message.error('\u6279\u91cf\u751f\u6210\u5931\u8d25')
-   } finally {
-     setBatchAssetLoading(false)
-   }
- }, [selectedAssets])
-
- return () => {
+    return () => {
       window.removeEventListener('message', handleMessage)
       window.removeEventListener('focus', handleFocus)
     }

@@ -31,7 +31,7 @@ import {
   VideoCameraOutlined,
 } from '@ant-design/icons'
 import type { ShotRead, ShotRuntimeSummaryRead, ShotStatus } from '../../../services/generated'
-import { ScriptProcessingService, StudioChaptersService, StudioShotsService } from '../../../services/generated'
+import { ScriptProcessingService, StudioChaptersService, StudioEntitiesService, StudioShotsService } from '../../../services/generated'
 import { executeAsyncTaskCreate, executeTaskCancel } from '../components/taskActionHelpers'
 import { Link, Navigate, useNavigate, useParams } from 'react-router-dom'
 import { getChapterShotEditPath, getChapterShotsPath, getChapterStudioPath } from '../project/ProjectWorkbench/routes'
@@ -123,6 +123,7 @@ export function ChapterShotsPage() {
   const [batchDeleting, setBatchDeleting] = useState(false)
   const [batchFrameLoading, setBatchFrameLoading] = useState(false)
   const [batchVideoLoading, setBatchVideoLoading] = useState(false)
+  const [batchBindLoading, setBatchBindLoading] = useState(false)
   const [createOpen, setCreateOpen] = useState(false)
   const [createSubmitting, setCreateSubmitting] = useState(false)
   const [createForm] = Form.useForm<{ title: string; script_excerpt?: string }>()
@@ -366,22 +367,111 @@ export function ChapterShotsPage() {
   )
 
 
+  const handleBatchBindAssets = async () => {
+    if (selectedRowKeys.length === 0) return
+    if (!projectId || !chapterId) return
+    const selectedShots = shots.filter((s) => selectedRowKeys.includes(s.id))
+    const eligible = selectedShots.filter((s) => !s.skip_extraction && s.extraction?.state !== 'extracted_resolved')
+    const skipped = selectedShots.length - eligible.length
+    if (eligible.length === 0) {
+      message.warning(`已选 ${selectedShots.length} 项均无可绑定镜头，已跳过 ${skipped} 个`)
+      return
+    }
+    setBatchBindLoading(true)
+    try {
+      const groups: { characters: unknown[]; scenes: unknown[]; props: unknown[]; costumes: unknown[] } = { characters: [], scenes: [], props: [], costumes: [] }
+      const entityTypes: Array<{ type: string; key: keyof typeof groups }> = [
+        { type: 'character', key: 'characters' },
+        { type: 'scene', key: 'scenes' },
+        { type: 'prop', key: 'props' },
+        { type: 'costume', key: 'costumes' },
+      ]
+      for (const { type, key } of entityTypes) {
+        try {
+          const res = await StudioEntitiesService.listEntitiesApiV1StudioEntitiesEntityTypeGet({ entityType: type, pageSize: 100 })
+          const items = (res.data?.items as unknown[] | undefined) ?? []
+          groups[key] = items.map((item) => {
+            const obj = (item ?? {}) as Record<string, unknown>
+            return { name: obj.name ?? obj.title ?? '', thumbnail: obj.thumbnail ?? null, id: obj.id ?? null, file_id: obj.file_id ?? null }
+          }).filter((item) => String(item.name).length > 0)
+        } catch {
+          groups[key] = []
+        }
+      }
+      const totalAssets = groups.characters.length + groups.scenes.length + groups.props.length + groups.costumes.length
+      if (totalAssets === 0) {
+        message.warning('项目还没有资产库。请先在"一键制作"或资产页完成资产提取与生成，再来此页绑定。')
+        return
+      }
+      const scriptDivision = {
+        total_shots: eligible.length,
+        shots: eligible.map((item) => ({
+          index: item.index,
+          start_line: 1,
+          end_line: 1,
+          script_excerpt: item.script_excerpt ?? '',
+          shot_name: item.title ?? '',
+        })),
+      }
+      let submitted = false
+      let failed = false
+      try {
+        const r = await fetch('/api/v1/script-processing/bind-assets-async', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            chapter_id: chapterId,
+            script_division_json: JSON.stringify(scriptDivision),
+            asset_list_json: JSON.stringify(groups),
+          }),
+        })
+        submitted = r.ok
+        if (!r.ok) failed = true
+      } catch {
+        failed = true
+      }
+      const parts: string[] = []
+      if (submitted) parts.push(`已提交 ${eligible.length} 条镜头资产绑定任务`)
+      else parts.push('资产绑定任务提交失败')
+      if (skipped > 0) parts.push(`跳过 ${skipped} 个已绑定或无需提取`)
+      if (failed) parts.push('提交失败')
+      message.success(parts.join('，'))
+    } catch {
+      message.error('批量绑定资产失败')
+    } finally {
+      setBatchBindLoading(false)
+    }
+  }
+
   const handleBatchGenerateFrames = async () => {
     if (selectedRowKeys.length === 0) return
+    const selectedShots = shots.filter((s) => selectedRowKeys.includes(s.id))
+    const eligible = selectedShots.filter((s) => s.extraction?.has_extracted)
+    const skipped = selectedShots.length - eligible.length
+    if (eligible.length === 0) {
+      message.warning(`\u5df2\u9009 ${selectedShots.length} \u9879\u5747\u672a\u7ed1\u5b9a\u8d44\u4ea7\uff0c\u5df2\u8df3\u8fc7 ${skipped} \u4e2a\uff0c\u65e0\u6cd5\u751f\u6210\u5e27\u56fe`)
+      return
+    }
     setBatchFrameLoading(true)
     try {
       let submitted = 0
-      for (const shotId of selectedRowKeys) {
+      let failed = 0
+      for (const shot of eligible) {
         try {
-          await fetch(`/api/v1/studio/image-tasks/shot/${shotId}/frame-image-tasks`, {
+          await fetch(`/api/v1/studio/image-tasks/shot/${shot.id}/frame-image-tasks`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ frame_type: 'first', model_id: null }),
           })
           submitted++
-        } catch {}
+        } catch {
+          failed++
+        }
       }
-      message.success(`\u5df2\u63d0\u4ea4 ${submitted}/${selectedRowKeys.length} \u4e2a\u5e27\u56fe\u751f\u6210\u4efb\u52a1`)
+      const parts = [`\u5df2\u63d0\u4ea4 ${submitted}/${selectedShots.length} \u4e2a\u5e27\u56fe\u751f\u6210\u4efb\u52a1`]
+      if (skipped > 0) parts.push(`\u8df3\u8fc7 ${skipped} \u4e2a\u672a\u7ed1\u5b9a\u8d44\u4ea7`)
+      if (failed > 0) parts.push(`\u5931\u8d25 ${failed}`)
+      message.success(parts.join('\uff0c'))
     } catch {
       message.error('\u6279\u91cf\u751f\u6210\u5e27\u56fe\u5931\u8d25')
     } finally {
@@ -391,20 +481,33 @@ export function ChapterShotsPage() {
 
   const handleBatchGenerateVideos = async () => {
     if (selectedRowKeys.length === 0) return
+    const selectedShots = shots.filter((s) => selectedRowKeys.includes(s.id))
+    const eligible = selectedShots.filter((s) => s.status === 'ready')
+    const skipped = selectedShots.length - eligible.length
+    if (eligible.length === 0) {
+      message.warning(`\u5df2\u9009 ${selectedShots.length} \u9879\u5747\u672a\u5c31\u7eea\uff08\u65e0\u5e27\u56fe\uff09\uff0c\u5df2\u8df3\u8fc7 ${skipped} \u4e2a\uff0c\u65e0\u6cd5\u751f\u6210\u89c6\u9891`)
+      return
+    }
     setBatchVideoLoading(true)
     try {
       let submitted = 0
-      for (const shotId of selectedRowKeys) {
+      let failed = 0
+      for (const shot of eligible) {
         try {
           await fetch('/api/v1/film/tasks/video', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ shot_id: shotId, reference_mode: 'text_only', ratio: '16:9', prompt: '' }),
+            body: JSON.stringify({ shot_id: shot.id, reference_mode: 'text_only', ratio: '16:9', prompt: '' }),
           })
           submitted++
-        } catch {}
+        } catch {
+          failed++
+        }
       }
-      message.success(`\u5df2\u63d0\u4ea4 ${submitted}/${selectedRowKeys.length} \u4e2a\u89c6\u9891\u751f\u6210\u4efb\u52a1`)
+      const parts = [`\u5df2\u63d0\u4ea4 ${submitted}/${selectedShots.length} \u4e2a\u89c6\u9891\u751f\u6210\u4efb\u52a1`]
+      if (skipped > 0) parts.push(`\u8df3\u8fc7 ${skipped} \u4e2a\u672a\u5c31\u7eea`)
+      if (failed > 0) parts.push(`\u5931\u8d25 ${failed}`)
+      message.success(parts.join('\uff0c'))
     } catch {
       message.error('\u6279\u91cf\u751f\u6210\u89c6\u9891\u5931\u8d25')
     } finally {
@@ -681,19 +784,27 @@ export function ChapterShotsPage() {
                   </Popconfirm>
                   <Button
                     icon={<VideoCameraOutlined />}
+                    loading={batchBindLoading}
+                    disabled={extracting || batchDeleting || batchFrameLoading || batchVideoLoading}
+                    onClick={() => void handleBatchBindAssets()}
+                  >
+                    \u6279\u91cf\u7ed1\u5b9a\u8d44\u4ea7
+                  </Button>
+                  <Button
+                    icon={<VideoCameraOutlined />}
                     loading={batchFrameLoading}
-                    disabled={extracting || batchDeleting || batchVideoLoading}
+                    disabled={extracting || batchDeleting || batchVideoLoading || batchBindLoading}
                     onClick={() => void handleBatchGenerateFrames()}
                   >
-                    {'\u6279\u91cf\u5e27\u56fe'}
+                    \u6279\u91cf\u5e27\u56fe
                   </Button>
                   <Button
                     icon={<VideoCameraOutlined />}
                     loading={batchVideoLoading}
-                    disabled={extracting || batchDeleting || batchFrameLoading}
+                    disabled={extracting || batchDeleting || batchFrameLoading || batchBindLoading}
                     onClick={() => void handleBatchGenerateVideos()}
                   >
-                    {'\u6279\u91cf\u89c6\u9891'}
+                    \u6279\u91cf\u89c6\u9891
                   </Button>
                 </>
               ) : null}

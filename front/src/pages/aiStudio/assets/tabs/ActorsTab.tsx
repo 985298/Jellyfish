@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Button, Card, Empty, Input, Modal, Pagination, Space, Tag, Tooltip, message } from 'antd'
-import { DeleteOutlined, EditOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons'
+import { Button, Card, Checkbox, Empty, Input, Modal, Pagination, Space, Tag, Tooltip, message } from 'antd'
+import { DeleteOutlined, EditOutlined, PlusOutlined, ReloadOutlined, ThunderboltOutlined } from '@ant-design/icons'
 import { StudioEntitiesApi } from '../../../../services/studioEntities'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { resolveAssetUrl } from '../utils'
 import { DisplayImageCard } from '../components/DisplayImageCard'
 import { ActorEntityFormModal, type ActorEntityLike } from '../components/ActorEntityFormModal'
+import { useBatchAssetImageGeneration } from '../hooks/useBatchAssetImageGeneration'
 
 export function ActorsTab() {
   const navigate = useNavigate()
@@ -19,6 +20,7 @@ export function ActorsTab() {
 
   const [editOpen, setEditOpen] = useState(false)
   const [editing, setEditing] = useState<ActorEntityLike | null>(null)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [fromShotCreateContext, setFromShotCreateContext] = useState<{
     projectId: string
     chapterId: string
@@ -26,6 +28,8 @@ export function ActorsTab() {
   } | null>(null)
   const projectId = searchParams.get('projectId')?.trim() ?? ''
   const createProjectId = fromShotCreateContext?.projectId ?? projectId
+
+  const batch = useBatchAssetImageGeneration('character')
 
   const load = async (opts?: { page?: number; pageSize?: number; q?: string }) => {
     setLoading(true)
@@ -87,6 +91,33 @@ export function ActorsTab() {
 
   const filtered = useMemo(() => actors, [actors])
 
+  const toggleSelect = (id: string, checked: boolean) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (checked) next.add(id)
+      else next.delete(id)
+      return next
+    })
+  }
+
+  const toggleSelectAll = (checked: boolean) => {
+    if (checked) {
+      setSelectedIds(new Set(filtered.map((a) => a.id)))
+    } else {
+      setSelectedIds(new Set())
+    }
+  }
+
+  const handleBatchGenerate = async () => {
+    if (selectedIds.size === 0) {
+      message.warning('请先勾选要生成图片的角色')
+      return
+    }
+    const targets = filtered.filter((a) => selectedIds.has(a.id))
+    await batch.generate(targets)
+    void load()
+  }
+
   const openCreate = () => {
     setEditing(null)
     setFromShotCreateContext(null)
@@ -121,6 +152,16 @@ export function ActorsTab() {
             }}
             style={{ width: 240 }}
           />
+          <Tooltip title={selectedIds.size === 0 ? '请先勾选要生成图片的角色' : ''}>
+            <Button
+              icon={<ThunderboltOutlined />}
+              loading={batch.loading}
+              disabled={selectedIds.size === 0}
+              onClick={() => void handleBatchGenerate()}
+            >
+              批量生成图片{selectedIds.size > 0 ? `（${selectedIds.size}）` : ''}
+            </Button>
+          </Tooltip>
           <Button icon={<ReloadOutlined />} onClick={() => void load()}>
             刷新
           </Button>
@@ -135,11 +176,28 @@ export function ActorsTab() {
       {filtered.length === 0 && !loading ? (
         <Empty description="暂无演员" image={Empty.PRESENTED_IMAGE_SIMPLE} />
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className="space-y-3">
+          <div className="flex items-center gap-2 text-sm text-gray-600">
+            <Checkbox
+              checked={filtered.length > 0 && filtered.every((a) => selectedIds.has(a.id))}
+              onChange={(e) => toggleSelectAll(e.target.checked)}
+            >
+              全选本页（已选 {selectedIds.size} 项）
+            </Checkbox>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
           {filtered.map((a) => (
             <DisplayImageCard
               key={a.id}
-              title={<div className="truncate">{a.name}</div>}
+              title={
+                <div className="flex items-center gap-2 min-w-0">
+                  <Checkbox
+                    checked={selectedIds.has(a.id)}
+                    onChange={(e) => toggleSelect(a.id, e.target.checked)}
+                  />
+                  <span className="truncate">{a.name}</span>
+                </div>
+              }
               imageUrl={resolveAssetUrl(a.thumbnail)}
               imageAlt={a.name}
               extra={
@@ -188,6 +246,7 @@ export function ActorsTab() {
               }
             />
           ))}
+          </div>
         </div>
       )}
 

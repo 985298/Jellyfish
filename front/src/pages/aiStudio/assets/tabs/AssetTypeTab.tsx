@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Card, Input, Row, Col, Tag, Button, message, Modal, Space, Pagination } from 'antd'
-import { EditOutlined, DeleteOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons'
+import { Card, Input, Row, Col, Tag, Button, message, Modal, Space, Pagination, Tooltip } from 'antd'
+import { EditOutlined, DeleteOutlined, PlusOutlined, ReloadOutlined, ThunderboltOutlined } from '@ant-design/icons'
 import { useSearchParams } from 'react-router-dom'
 import { resolveAssetUrl } from '../utils'
 import { DisplayImageCard } from '../components/DisplayImageCard'
@@ -9,6 +9,7 @@ import {
   normalizeStudioAsset,
   type StudioAssetLike,
 } from '../components/StudioAssetTypeFormModal'
+import { useBatchAssetImageGeneration } from '../hooks/useBatchAssetImageGeneration'
 
 export type { StudioAssetLike }
 
@@ -72,6 +73,40 @@ export function AssetTypeTab({
   const [previewUrl, setPreviewUrl] = useState('')
   const [previewTitle, setPreviewTitle] = useState('')
 
+  const filtered = useMemo(() => {
+    return Array.isArray(assets) ? assets : []
+  }, [assets])
+
+  const batch = useBatchAssetImageGeneration(tabKey)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+
+  const toggleSelect = (id: string, checked: boolean) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (checked) next.add(id)
+      else next.delete(id)
+      return next
+    })
+  }
+
+  const toggleSelectAll = (checked: boolean) => {
+    if (checked) {
+      setSelectedIds(new Set(filtered.map((a) => a.id)))
+    } else {
+      setSelectedIds(new Set())
+    }
+  }
+
+  const handleBatchGenerate = async () => {
+    if (selectedIds.size === 0) {
+      message.warning('请先勾选要生成图片的资产')
+      return
+    }
+    const targets = filtered.filter((a) => selectedIds.has(a.id))
+    await batch.generate(targets)
+    await load()
+  }
+
   const load = async (opts?: { page?: number; pageSize?: number; q?: string }) => {
     setLoading(true)
     try {
@@ -93,10 +128,6 @@ export function AssetTypeTab({
     void load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page, pageSize])
-
-  const filtered = useMemo(() => {
-    return Array.isArray(assets) ? assets : []
-  }, [assets])
 
   const openCreate = () => {
     setEditing(null)
@@ -214,6 +245,16 @@ export function AssetTypeTab({
           }}
         />
         <Space>
+          <Tooltip title="勾选下方资产后批量生成图片">
+            <Button
+              icon={<ThunderboltOutlined />}
+              loading={batch.loading}
+              disabled={selectedIds.size === 0}
+              onClick={() => void handleBatchGenerate()}
+            >
+              批量生成图片{selectedIds.size > 0 ? `（${selectedIds.size}）` : ''}
+            </Button>
+          </Tooltip>
           <Button icon={<ReloadOutlined />} onClick={() => void load()} loading={loading}>
             刷新
           </Button>
@@ -222,6 +263,18 @@ export function AssetTypeTab({
           </Button>
         </Space>
       </div>
+
+      {filtered.length > 0 ? (
+        <div className="flex items-center gap-2 text-sm text-gray-600">
+          <input
+            type="checkbox"
+            checked={filtered.length > 0 && filtered.every((a) => selectedIds.has(a.id))}
+            onChange={(e) => toggleSelectAll(e.target.checked)}
+            className="align-middle"
+          />
+          <span>全选本页（已选 {selectedIds.size} 项）</span>
+        </div>
+      ) : null}
 
       <Card loading={loading}>
         <Row gutter={[16, 16]}>
@@ -235,7 +288,18 @@ export function AssetTypeTab({
               return (
                 <Col xs={24} sm={12} md={8} lg={6} key={a.id}>
                   <DisplayImageCard
-                    title={<span className="truncate">{a.name}</span>}
+                    title={
+                      <div className="flex items-center gap-2 min-w-0">
+                        <input
+                          type="checkbox"
+                          checked={selectedIds.has(a.id)}
+                          onChange={(e) => toggleSelect(a.id, e.target.checked)}
+                          className="align-middle shrink-0"
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                        <span className="truncate">{a.name}</span>
+                      </div>
+                    }
                     imageUrl={thumbnailUrl}
                     imageAlt={a.name}
                     placeholder="未生成"
