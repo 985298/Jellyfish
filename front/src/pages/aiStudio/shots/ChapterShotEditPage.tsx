@@ -12,9 +12,9 @@ import type {
   ShotExtractedDialogueCandidateRead,
   ShotPreparationStateRead,
   ShotRead,
+  TaskStatus,
 } from '../../../services/generated'
 import {
-  ScriptProcessingService,
   StudioChaptersService,
   StudioEntitiesService,
   StudioProjectsService,
@@ -903,6 +903,36 @@ export function ChapterShotEditPage() {
     [applyPreparationState, loadPreparationState, shotId],
   )
 
+  const loadProjectAssetsForBind = useCallback(async (): Promise<{ characters: unknown[]; scenes: unknown[]; props: unknown[]; costumes: unknown[] } | null> => {
+    if (!projectId) return null
+    try {
+      const groups: { characters: unknown[]; scenes: unknown[]; props: unknown[]; costumes: unknown[] } = { characters: [], scenes: [], props: [], costumes: [] }
+      const entityTypes: Array<{ type: string; key: keyof typeof groups }> = [
+        { type: 'character', key: 'characters' },
+        { type: 'scene', key: 'scenes' },
+        { type: 'prop', key: 'props' },
+        { type: 'costume', key: 'costumes' },
+      ]
+      for (const { type, key } of entityTypes) {
+        try {
+          const res = await StudioEntitiesService.listEntitiesApiV1StudioEntitiesEntityTypeGet({ entityType: type, pageSize: 100 })
+          const items = (res.data?.items as unknown[] | undefined) ?? []
+          groups[key] = items.map((item) => {
+            const obj = (item ?? {}) as Record<string, unknown>
+            return { name: obj.name ?? obj.title ?? '', thumbnail: obj.thumbnail ?? null, id: obj.id ?? null, file_id: obj.file_id ?? null }
+          }).filter((item) => String(item.name).length > 0)
+        } catch {
+          groups[key] = []
+        }
+      }
+      const total = groups.characters.length + groups.scenes.length + groups.props.length + groups.costumes.length
+      if (total === 0) return null
+      return groups
+    } catch {
+      return null
+    }
+  }, [projectId])
+
   const extractAssets = useCallback(async () => {
     if (!projectId || !chapterId || !shot) return
     if (extractInFlightRef.current) return
@@ -915,6 +945,13 @@ export function ChapterShotEditPage() {
     extractInFlightRef.current = true
     setExtractingAssets(true)
     try {
+      message.loading({ content: '加载项目资产库...', key: 'bind', duration: 0 })
+      const assetList = await loadProjectAssetsForBind()
+      if (!assetList) {
+        message.destroy('bind')
+        message.warning('项目还没有资产库。请先在"一键制作"或资产页完成资产提取与生成，再来此页绑定。')
+        return
+      }
       const scriptDivision = {
         total_shots: 1,
         shots: [
@@ -927,29 +964,34 @@ export function ChapterShotEditPage() {
           },
         ],
       }
+      message.loading({ content: '提交资产绑定任务...', key: 'bind', duration: 0 })
       await executeAsyncTaskCreate({
-        request: () =>
-          ScriptProcessingService.extractScriptAsyncApiV1ScriptProcessingExtractAsyncPost({
-            requestBody: {
-              project_id: projectId,
+        request: async () => {
+          const r = await fetch('/api/v1/script-processing/bind-assets-async', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
               chapter_id: chapterId,
-              script_division: scriptDivision as any,
-              consistency: undefined,
-              refresh_cache: true,
-            } as any,
-          }),
+              script_division_json: JSON.stringify(scriptDivision),
+              asset_list_json: JSON.stringify(assetList),
+            }),
+          })
+          const json = await r.json()
+          return (json?.data ? { data: json.data } : { data: null }) as { data: { task_id: string; status: TaskStatus; reused?: boolean | null } | null }
+        },
         trackTaskData: trackExtractTaskData,
         startedMessage: extractTaskCopy.startedMessage,
         reusedMessage: extractTaskCopy.reusedMessage,
-        fallbackErrorMessage: '提取失败',
+        fallbackErrorMessage: '资产绑定失败',
       })
+      message.destroy('bind')
     } catch {
-      // executeAsyncTaskCreate 已统一处理错误提示
+      message.destroy('bind')
     } finally {
       setExtractingAssets(false)
       extractInFlightRef.current = false
     }
-  }, [chapterId, extractTask, projectId, shot])
+  }, [chapterId, extractTask, loadProjectAssetsForBind, projectId, shot])
 
   const batchExtractAssets = useCallback(async () => {
     if (!projectId || !chapterId || selectedShots.length === 0) return
@@ -973,6 +1015,13 @@ export function ChapterShotEditPage() {
     extractInFlightRef.current = true
     setBatchExtractingAssets(true)
     try {
+      message.loading({ content: '加载项目资产库...', key: 'bind', duration: 0 })
+      const assetList = await loadProjectAssetsForBind()
+      if (!assetList) {
+        message.destroy('bind')
+        message.warning('项目还没有资产库。请先在"一键制作"或资产页完成资产提取与生成，再来此页绑定。')
+        return
+      }
       const scriptDivision = {
         total_shots: actionableShots.length,
         shots: actionableShots.map((item) => ({
@@ -983,29 +1032,34 @@ export function ChapterShotEditPage() {
           shot_name: item.title ?? '',
         })),
       }
+      message.loading({ content: `提交 ${actionableShots.length} 条镜头资产绑定任务...`, key: 'bind', duration: 0 })
       await executeAsyncTaskCreate({
-        request: () =>
-          ScriptProcessingService.extractScriptAsyncApiV1ScriptProcessingExtractAsyncPost({
-            requestBody: {
-              project_id: projectId,
+        request: async () => {
+          const r = await fetch('/api/v1/script-processing/bind-assets-async', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
               chapter_id: chapterId,
-              script_division: scriptDivision as any,
-              consistency: undefined,
-              refresh_cache: true,
-            } as any,
-          }),
+              script_division_json: JSON.stringify(scriptDivision),
+              asset_list_json: JSON.stringify(assetList),
+            }),
+          })
+          const json = await r.json()
+          return (json?.data ? { data: json.data } : { data: null }) as { data: { task_id: string; status: TaskStatus; reused?: boolean | null } | null }
+        },
         trackTaskData: trackExtractTaskData,
-        startedMessage: actionableShots.length > 1 ? `已开始提取 ${actionableShots.length} 条镜头` : extractTaskCopy.startedMessage,
+        startedMessage: actionableShots.length > 1 ? `已开始绑定 ${actionableShots.length} 条镜头资产` : extractTaskCopy.startedMessage,
         reusedMessage: extractTaskCopy.reusedMessage,
-        fallbackErrorMessage: '批量提取失败',
+        fallbackErrorMessage: '批量绑定失败',
       })
+      message.destroy('bind')
     } catch {
-      // executeAsyncTaskCreate 已统一处理错误提示
+      message.destroy('bind')
     } finally {
       setBatchExtractingAssets(false)
       extractInFlightRef.current = false
     }
-  }, [chapterId, extractTask, projectId, selectedShots])
+  }, [chapterId, extractTask, loadProjectAssetsForBind, projectId, selectedShots])
 
   const cancelExtractTask = useCallback(async () => {
     if (!extractTask?.taskId) return
@@ -1500,7 +1554,7 @@ export function ChapterShotEditPage() {
                 disabled={extractTaskActive}
                 onClick={() => void extractAssets()}
               >
-                提取并刷新候选
+                绑定资产
               </Button>
               {extractTask ? (
                 <Button
@@ -1669,7 +1723,7 @@ export function ChapterShotEditPage() {
                     </Space>
                     {multiSelectActive ? (
                       <Space size={6} className="shrink-0">
-                        <Tooltip title="批量提取并刷新">
+                        <Tooltip title="批量绑定资产">
                           <Button
                             size="small"
                             type="primary"

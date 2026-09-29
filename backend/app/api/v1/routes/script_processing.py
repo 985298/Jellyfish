@@ -68,7 +68,7 @@ from app.services.script_processing_tasks import (
     spawn_script_simplification_task,
     spawn_variant_task,
 )
-from app.services.studio.shot_semantic_defaults import apply_shot_semantic_defaults_from_draft
+from app.services.studio.script_division import write_division_result_to_chapter
 from app.api.v1.routes.film.common import AsyncTaskCreateRead
 
 logger = logging.getLogger(__name__)
