@@ -22,3 +22,13 @@ htmlcov/
 .jellyfish.db
 jellyfish.db
 .env
+
+# Debug / generated scripts  
+_diag_*.py
+gen_*.py
+update_prog.py
+front/_vite_log.txt
+
+# SQLite WAL files
+.jellyfish.db-shm
+.jellyfish.db-wal
