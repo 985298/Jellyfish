@@ -46,7 +46,7 @@ const AssetManager = () => {
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 h-full overflow-auto">
       <Card>
         <Tabs
           activeKey={activeTab}
