@@ -22,6 +22,7 @@ function normalizeTags(input: string): string[] {
 }
 
 export function ActorEntityFormModal({
+  entityType = 'actor',
   open,
   editing,
   linkProjectId,
@@ -30,6 +31,7 @@ export function ActorEntityFormModal({
   onCancel,
   onSuccess,
 }: {
+  entityType?: 'actor' | 'character'
   open: boolean
   editing: ActorEntityLike | null
   linkProjectId?: string
@@ -76,8 +78,8 @@ export function ActorEntityFormModal({
     }
     try {
       if (!editing) {
-        const created = await StudioEntitiesApi.create('actor', {
-          id: crypto?.randomUUID?.() ?? `actor_${Date.now()}`,
+        const created = await StudioEntitiesApi.create(entityType, {
+          id: crypto?.randomUUID?.() ?? `${entityType}_${Date.now()}`,
           name,
           description: formDesc.trim() || undefined,
           tags: normalizeTags(formTags),
@@ -93,7 +95,7 @@ export function ActorEntityFormModal({
         onCancel()
         await onSuccess({ created: created.data })
       } else {
-        await StudioEntitiesApi.update('actor', editing.id, {
+        await StudioEntitiesApi.update(entityType, editing.id, {
           name,
           description: formDesc.trim() || null,
           tags: normalizeTags(formTags),

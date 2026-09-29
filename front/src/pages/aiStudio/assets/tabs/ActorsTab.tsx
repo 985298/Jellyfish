@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Button, Card, Empty, Input, Modal, Pagination, Space, Tag, message } from 'antd'
+import { Button, Card, Empty, Input, Modal, Pagination, Space, Tag, Tooltip, message } from 'antd'
 import { DeleteOutlined, EditOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons'
 import { StudioEntitiesApi } from '../../../../services/studioEntities'
 import { useNavigate, useSearchParams } from 'react-router-dom'
@@ -24,6 +24,8 @@ export function ActorsTab() {
     chapterId: string
     shotId: string
   } | null>(null)
+  const projectId = searchParams.get('projectId')?.trim() ?? ''
+  const createProjectId = fromShotCreateContext?.projectId ?? projectId
 
   const load = async (opts?: { page?: number; pageSize?: number; q?: string }) => {
     setLoading(true)
@@ -31,7 +33,7 @@ export function ActorsTab() {
       const nextPage = opts?.page ?? page
       const nextPageSize = opts?.pageSize ?? pageSize
       const q = typeof opts?.q === 'string' ? opts.q : search.trim() || undefined
-      const res = await StudioEntitiesApi.list('actor', {
+      const res = await StudioEntitiesApi.list('character', {
         page: nextPage,
         pageSize: nextPageSize,
         q: q ?? null,
@@ -122,9 +124,11 @@ export function ActorsTab() {
           <Button icon={<ReloadOutlined />} onClick={() => void load()}>
             刷新
           </Button>
-          <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
-            新建
-          </Button>
+          <Tooltip title={createProjectId ? '' : '请从项目内新建角色'}>
+            <Button type="primary" icon={<PlusOutlined />} disabled={!createProjectId} onClick={openCreate}>
+              新建
+            </Button>
+          </Tooltip>
         </Space>
       }
     >
@@ -158,7 +162,7 @@ export function ActorsTab() {
                         okButtonProps: { danger: true },
                         onOk: async () => {
                           try {
-                            await StudioEntitiesApi.remove('actor', a.id)
+                            await StudioEntitiesApi.remove('character', a.id)
                             message.success('已删除')
                             void load()
                           } catch {
@@ -201,9 +205,10 @@ export function ActorsTab() {
       </div>
 
       <ActorEntityFormModal
+        entityType="character"
         open={editOpen}
         editing={editing}
-        linkProjectId={fromShotCreateContext?.projectId}
+        linkProjectId={createProjectId}
         linkChapterId={fromShotCreateContext?.chapterId}
         linkShotId={fromShotCreateContext?.shotId}
         onCancel={handleModalCancel}

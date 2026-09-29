@@ -68,28 +68,28 @@ export const assetAdapters = {
     missingAssetIdText: '缺少 actor_id',
     assetDisplayName: '演员',
     backTo: '/assets?tab=actor',
-    relationType: 'actor_image',
+    relationType: 'character_image',
     getAsset: async (id: string) => {
-      const res = await StudioEntitiesApi.get('actor', id)
+      const res = await StudioEntitiesApi.get('character', id)
       return (res.data ?? null) as any | null
     },
     updateAsset: async (id: string, payload) => {
-      const res = await StudioEntitiesApi.update('actor', id, payload as Record<string, unknown>)
+      const res = await StudioEntitiesApi.update('character', id, payload as Record<string, unknown>)
       return (res.data ?? null) as any | null
     },
     listImages: async (id: string) => {
-      const res = await StudioEntitiesApi.listImages('actor', id, { page: 1, pageSize: 100 })
+      const res = await StudioEntitiesApi.listImages('character', id, { page: 1, pageSize: 100 })
       return (res.data?.items ?? []) as any[]
     },
     createImageSlot: async (id: string, angle) => {
-      await StudioEntitiesApi.createImage('actor', id, { view_angle: angle })
+      await StudioEntitiesApi.createImage('character', id, { view_angle: angle })
     },
     updateImage: async (id: string, imageId: number, payload) => {
-      await StudioEntitiesApi.updateImage('actor', id, imageId, normalizeUpdateImagePayload(payload))
+      await StudioEntitiesApi.updateImage('character', id, imageId, normalizeUpdateImagePayload(payload))
     },
     renderPrompt: async (id: string, imageId: number) => {
-      const res = await StudioImageTasksService.renderActorImagePromptApiV1StudioImageTasksActorsActorIdRenderPromptPost({
-        actorId: id,
+      const res = await StudioImageTasksService.renderCharacterImagePromptApiV1StudioImageTasksCharactersCharacterIdRenderPromptPost({
+        characterId: id,
         requestBody: { image_id: imageId, model_id: null } as any,
       })
       const data = res.data
@@ -99,8 +99,8 @@ export const assetAdapters = {
       }
     },
     createGenerationTask: async (id: string, imageId: number, payload: { prompt: string; images: string[] }) => {
-      const res = await StudioImageTasksService.createActorImageGenerationTaskApiV1StudioImageTasksActorsActorIdImageTasksPost({
-        actorId: id,
+      const res = await StudioImageTasksService.createCharacterImageGenerationTaskApiV1StudioImageTasksCharactersCharacterIdImageTasksPost({
+        characterId: id,
         requestBody: { image_id: imageId, model_id: null, prompt: payload.prompt, images: payload.images } as any,
       })
       return res.data?.task_id ?? null
