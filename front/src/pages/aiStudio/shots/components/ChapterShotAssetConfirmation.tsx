@@ -134,7 +134,7 @@ export function ChapterShotAssetConfirmation({
             checked={selectedAssets?.has(`${asset.kind}:${asset.name}`) || false}
             onChange={(e) => onToggleSelect?.(`${asset.kind}:${asset.name}`, e.target.checked)}
           />
-        </div> className="col-span-12 md:col-span-6 xl:col-span-3 2xl:col-span-2">
+        </div>
         <DisplayImageCard
           title={
             <div className="flex items-center justify-between gap-2 min-w-0">
