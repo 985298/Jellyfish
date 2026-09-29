@@ -283,8 +283,6 @@ async def create_asset_image_generation_task(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="prompt is required for asset image generation",
         )
-    # Apply prompt template + negative prompt based on asset type
-    prompt, neg_prompt = await _apply_prompt_template(db, submission.relation_type, prompt)
     submission = await _build_asset_image_submission_payload_service(
         db,
         asset_type=asset_type,
@@ -293,6 +291,8 @@ async def create_asset_image_generation_task(
         prompt=prompt,
         images=body.images,
     )
+    # Apply prompt template + negative prompt based on asset type
+    prompt, neg_prompt = await _apply_prompt_template(db, submission.relation_type, prompt)
     ref_images = await _resolve_reference_image_refs_by_file_ids_service(db, file_ids=submission.images)
 
     task_id = await _create_image_task_and_link_service(
