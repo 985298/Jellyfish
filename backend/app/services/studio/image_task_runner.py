@@ -68,12 +68,15 @@ async def _persist_images_to_assets(
         return
 
     item = images[0]
-    if not item.url:
+    # Check for both URL and base64 data (API may return either)
+    b64_data = getattr(item, 'b64_json', None) or getattr(item, 'b64', None) or getattr(item, 'base64', None)
+    if not item.url and not b64_data:
         return
 
     file_obj = await create_file_from_url_or_b64(
         session,
         url=item.url,
+        b64_data=b64_data,
         name=f"{relation_type}-{relation_entity_id}",
         prefix=f"generated-images/{relation_type}/{relation_entity_id}",
     )
