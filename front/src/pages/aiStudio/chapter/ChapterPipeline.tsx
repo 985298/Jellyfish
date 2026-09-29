@@ -265,31 +265,6 @@ export default function ChapterPipeline() {
     setStages(prev => prev.map(s => s.key === key ? { ...s, status } : s))
   }
 
-  const runAssetExtract = async () => {
-    if (!projectId || !scriptText) return
-    setLoading(true)
-    updateStage('asset_extract', 'running')
-    try {
-      message.loading({ content: '\u8d44\u4ea7\u63d0\u53d6\u4e2d...', key: 'pipe', duration: 0 })
-      const res = await fetch(`${SCRIPT_API}/asset-extract-async`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ project_id: projectId, script_text: scriptText }),
-      })
-      const data = (await res.json())?.data || {}
-      const tid = data.task_id
-      if (!tid) throw new Error('No task_id')
-      const result = await pollTask(tid)
-      setAssetList(result)
-      updateStage('asset_extract', 'done')
-      message.success({ content: '\u8d44\u4ea7\u63d0\u53d6\u5b8c\u6210', key: 'pipe' })
-      await loadStatus()
-    } catch (e: any) {
-      updateStage('asset_extract', 'not_started')
-      message.error({ content: e?.message || '\u63d0\u53d6\u5931\u8d25', key: 'pipe' })
-    } finally {
-      setLoading(false)
-    }
   }
 
   const runDivide = async () => {
