@@ -31,7 +31,7 @@ export default function ChapterPipeline() {
   const [chapterTitle, setChapterTitle] = useState('')
   const [scriptText, setScriptText] = useState('')
   const [divideResult, setDivideResult] = useState<any>(null)
-  const [assetList, setAssetList] = useState<any>(null)
+  const [assetList] = useState<any>(null)
 
   const loadStatus = useCallback(async () => {
     if (!chapterId) return

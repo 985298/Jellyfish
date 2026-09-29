@@ -189,7 +189,7 @@ export function ChapterShotEditPage() {
 
   const [chapterTitle, setChapterTitle] = useState('')
   const [chapterIndex, setChapterIndex] = useState<number | null>(null)
-  const [projectVisualStyle, setProjectVisualStyle] = useState<'现实' | '动漫'>('现实')
+  const [, setProjectVisualStyle] = useState<'现实' | '动漫'>('现实')
   const [projectStyle, setProjectStyle] = useState<string>('真人都市')
   const [shots, setShots] = useState<ShotRead[]>([])
   const [shot, setShot] = useState<ShotRead | null>(null)
