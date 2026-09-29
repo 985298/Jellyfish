@@ -68,8 +68,8 @@ export default function ChapterPipeline() {
         const rr = await FilmService.getTaskResultApiV1FilmTasksTaskIdResultGet({ taskId })
         return rr.data
       }
-      if (st === 'failed' || st === 'error' || st === 'cancelled') {
-        throw new Error(String(res.data?.error || `Task ${st}`))
+      if (st === 'failed' || st === 'cancelled') {
+        throw new Error(`Task ${st}`)
       }
     }
     throw new Error('Timeout')

@@ -207,9 +207,12 @@ export function ChapterShotEditPage() {
   const [skipExtractionUpdating, setSkipExtractionUpdating] = useState(false)
   const extractInFlightRef = useRef(false)
   const [selectedShotIds, setSelectedShotIds] = useState<string[]>(shotId ? [shotId] : [])
-  const pendingExternalAssetCreateRef = useRef(false)
+ const pendingExternalAssetCreateRef = useRef(false)
 
-  const [linkingOpen, setLinkingOpen] = useState(false)
+ const [selectedAssets, setSelectedAssets] = useState<Set<string>>(new Set())
+ const [batchAssetLoading, setBatchAssetLoading] = useState(false)
+
+ const [linkingOpen, setLinkingOpen] = useState(false)
   const [linkingLoading, setLinkingLoading] = useState(false)
   const [linkingActionLoading, setLinkingActionLoading] = useState(false)
   const [linkingHint, setLinkingHint] = useState<string>('')
@@ -706,7 +709,58 @@ export function ChapterShotEditPage() {
 
     window.addEventListener('message', handleMessage)
     window.addEventListener('focus', handleFocus)
-  
+ 
+ const toggleAssetSelect = useCallback((key: string, checked: boolean) => {
+   setSelectedAssets(prev => {
+     const next = new Set(prev)
+     if (checked) next.add(key)
+     else next.delete(key)
+     return next
+   })
+ }, [])
+
+ const selectAllAssets = useCallback((checked: boolean) => {
+   if (checked) {
+     const all = new Set<string>()
+     Object.values(unionAssets || {}).flat().forEach((a: any) => all.add(`${a.kind}:${a.name}`))
+     setSelectedAssets(all)
+   } else {
+     setSelectedAssets(new Set())
+   }
+ }, [unionAssets])
+
+ const batchGenerateAssetImages = useCallback(async () => {
+   if (selectedAssets.size === 0) return
+   setBatchAssetLoading(true)
+   try {
+     let submitted = 0
+     for (const key of selectedAssets) {
+       const [kind, ...nameParts] = key.split(':')
+       const name = nameParts.join(':')
+       const entityType = kind === 'actor' ? 'character' : kind
+       try {
+         await fetch(`/api/v1/studio/image-tasks/${entityType}s`, {
+           method: 'POST',
+           headers: { 'Content-Type': 'application/json' },
+           body: JSON.stringify({ name, prompt: name }),
+         })
+         submitted++
+       } catch {}
+     }
+     message.success(`\u5df2\u63d0\u4ea4 ${submitted}/${selectedAssets.size} \u4e2a\u56fe\u7247\u751f\u6210\u4efb\u52a1`)
+   } catch {
+     message.error('\u6279\u91cf\u751f\u6210\u5931\u8d25')
+   } finally {
+     setBatchAssetLoading(false)
+   }
+ }, [selectedAssets])
+
+ return () => {
+      window.removeEventListener('message', handleMessage)
+      window.removeEventListener('focus', handleFocus)
+    }
+  }, [chapterId, loadPreparationState, projectId, shotId])
+
   const toggleAssetSelect = useCallback((key: string, checked: boolean) => {
     setSelectedAssets(prev => {
       const next = new Set(prev)
@@ -751,12 +805,6 @@ export function ChapterShotEditPage() {
       setBatchAssetLoading(false)
     }
   }, [selectedAssets])
-
-  return () => {
-      window.removeEventListener('message', handleMessage)
-      window.removeEventListener('focus', handleFocus)
-    }
-  }, [chapterId, loadPreparationState, projectId, shotId])
 
   // 切换分镜时：清理对白防抖，准备状态由 loadPage 统一加载
   useEffect(() => {

@@ -325,8 +325,8 @@ const ChapterPrep: React.FC = () => {
         const resultRes = await FilmService.getTaskResultApiV1FilmTasksTaskIdResultGet({ taskId })
         return resultRes.data
       }
-      if (st === 'failed' || st === 'error' || st === 'cancelled') {
-        throw new Error(String(res.data?.error || `Task ${st}`))
+      if (st === 'failed' || st === 'cancelled') {
+        throw new Error(`Task ${st}`)
       }
     }
     throw new Error('Task timeout (5min)')
