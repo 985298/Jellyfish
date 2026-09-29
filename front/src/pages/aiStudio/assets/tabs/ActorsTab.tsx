@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Button, Card, Checkbox, Empty, Input, Modal, Pagination, Space, Tag, Tooltip, message } from 'antd'
-import { DeleteOutlined, EditOutlined, PlusOutlined, ReloadOutlined, ThunderboltOutlined } from '@ant-design/icons'
+import { Button, Card, Checkbox, Empty, Input, Modal, Pagination, Progress, Space, Tag, Tooltip, message } from 'antd'
+import { DeleteOutlined, EditOutlined, PlusOutlined, ReloadOutlined, StopOutlined, ThunderboltOutlined } from '@ant-design/icons'
 import { StudioEntitiesApi } from '../../../../services/studioEntities'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { resolveAssetUrl } from '../utils'
@@ -56,36 +56,32 @@ export function ActorsTab() {
 
   useEffect(() => {
     void load()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page, pageSize])
 
   useEffect(() => {
     const create = searchParams.get('create')
     const tab = searchParams.get('tab')
-    const projectId = searchParams.get('projectId')?.trim() ?? ''
+    const pid = searchParams.get('projectId')?.trim() ?? ''
     const chapterId = searchParams.get('chapterId')?.trim() ?? ''
     const shotId = searchParams.get('shotId')?.trim() ?? ''
     if (create === '1' && tab === 'actor') {
       setEditing(null)
-      if (projectId && chapterId && shotId) {
-        setFromShotCreateContext({ projectId, chapterId, shotId })
+      if (pid && chapterId && shotId) {
+        setFromShotCreateContext({ projectId: pid, chapterId, shotId })
       } else {
         setFromShotCreateContext(null)
       }
       setEditOpen(true)
-      setSearchParams(
-        (prev) => {
-          const next = new URLSearchParams(prev)
-          next.delete('create')
-          next.delete('name')
-          next.delete('desc')
-          next.delete('projectId')
-          next.delete('chapterId')
-          next.delete('shotId')
-          return next
-        },
-        { replace: true },
-      )
+      setSearchParams((prev) => {
+        const next = new URLSearchParams(prev)
+        next.delete('create')
+        next.delete('name')
+        next.delete('desc')
+        next.delete('projectId')
+        next.delete('chapterId')
+        next.delete('shotId')
+        return next
+      }, { replace: true })
     }
   }, [searchParams, setSearchParams])
 
@@ -101,11 +97,8 @@ export function ActorsTab() {
   }
 
   const toggleSelectAll = (checked: boolean) => {
-    if (checked) {
-      setSelectedIds(new Set(filtered.map((a) => a.id)))
-    } else {
-      setSelectedIds(new Set())
-    }
+    if (checked) setSelectedIds(new Set(filtered.map((a) => a.id)))
+    else setSelectedIds(new Set())
   }
 
   const handleBatchGenerate = async () => {
@@ -146,10 +139,7 @@ export function ActorsTab() {
             allowClear
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            onSearch={(v) => {
-              setPage(1)
-              void load({ q: v, page: 1 })
-            }}
+            onSearch={(v) => { setPage(1); void load({ q: v, page: 1 }) }}
             style={{ width: 240 }}
           />
           <Tooltip title={selectedIds.size === 0 ? '请先勾选要生成图片的角色' : ''}>
@@ -242,7 +232,26 @@ export function ActorsTab() {
                       </Tag>
                     ))}
                   </div>
+                  {(() => {
+                    const gs = batch.genStates[a.id]
+                    if (!gs?.taskId) return null
+                    if (gs.status === 'pending' || gs.status === 'running') {
+                      return <Button size="small" danger icon={<StopOutlined />} loading={gs.status === 'running'} onClick={() => void batch.cancel(a.id)} className="mt-2">取消</Button>
+                    }
+                    return null
+                  })()}
                 </div>
+              }
+              footer={
+                (() => {
+                  const gs = batch.genStates[a.id]
+                  if (!gs?.taskId) return null
+                  if (gs.status === 'pending' || gs.status === 'running') return <div className="mt-2"><Progress percent={gs.progress} size="small" /></div>
+                  if (gs.status === 'succeeded') return <div className="mt-2 text-xs text-green-600">生成成功</div>
+                  if (gs.status === 'cancelled') return <div className="mt-2 text-xs text-orange-600">已取消</div>
+                  if (gs.status === 'failed') return <div className="mt-2 text-xs text-red-600">生成失败</div>
+                  return null
+                })()
               }
             />
           ))}

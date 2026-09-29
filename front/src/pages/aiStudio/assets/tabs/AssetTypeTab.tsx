@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Card, Input, Row, Col, Tag, Button, message, Modal, Space, Pagination, Tooltip } from 'antd'
-import { EditOutlined, DeleteOutlined, PlusOutlined, ReloadOutlined, ThunderboltOutlined } from '@ant-design/icons'
+import { Card, Input, Row, Col, Tag, Button, message, Modal, Space, Pagination, Tooltip, Progress } from 'antd'
+import { EditOutlined, DeleteOutlined, PlusOutlined, ReloadOutlined, ThunderboltOutlined, StopOutlined } from '@ant-design/icons'
 import { useSearchParams } from 'react-router-dom'
 import { resolveAssetUrl } from '../utils'
 import { DisplayImageCard } from '../components/DisplayImageCard'
@@ -126,7 +126,6 @@ export function AssetTypeTab({
 
   useEffect(() => {
     void load()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page, pageSize])
 
   const openCreate = () => {
@@ -259,7 +258,7 @@ export function AssetTypeTab({
             刷新
           </Button>
           <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
-            新建{label}
+            新建${label}
           </Button>
         </Space>
       </div>
@@ -285,6 +284,7 @@ export function AssetTypeTab({
           ) : (
             filtered.map((a) => {
               const thumbnailUrl = resolveAssetUrl(a.thumbnail)
+              const gs = batch.genStates[a.id]
               return (
                 <Col xs={24} sm={12} md={8} lg={6} key={a.id}>
                   <DisplayImageCard
@@ -330,7 +330,22 @@ export function AssetTypeTab({
                             <Tag key={t}>{t}</Tag>
                           ))}
                         </div>
+                        {gs?.taskId && (gs.status === 'pending' || gs.status === 'running') && (
+                          <Button size="small" danger icon={<StopOutlined />} loading={gs.status === 'running'} onClick={() => void batch.cancel(a.id)} className="mt-2">
+                            取消
+                          </Button>
+                        )}
                       </>
+                    }
+                    footer={
+                      (() => {
+                        if (!gs?.taskId) return null
+                        if (gs.status === 'pending' || gs.status === 'running') return <div className="mt-2"><Progress percent={gs.progress} size="small" /></div>
+                        if (gs.status === 'succeeded') return <div className="mt-2 text-xs text-green-600">生成成功</div>
+                        if (gs.status === 'cancelled') return <div className="mt-2 text-xs text-orange-600">已取消</div>
+                        if (gs.status === 'failed') return <div className="mt-2 text-xs text-red-600">生成失败</div>
+                        return null
+                      })()
                     }
                   />
                 </Col>
