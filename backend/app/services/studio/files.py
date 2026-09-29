@@ -9,7 +9,7 @@ from typing import Any
 from urllib.parse import quote
 
 from fastapi import HTTPException, UploadFile
-from fastapi.responses import StreamingResponse
+from fastapi.responses import RedirectResponse, StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -189,6 +189,13 @@ async def build_download_response(
 ) -> StreamingResponse:
     """根据 file_id 构建下载响应。"""
     file_item = await get_or_404(db, FileItem, file_id, detail=entity_not_found("File"))
+    storage_key = file_item.storage_key or ""
+
+    # storage_key 可能是外部 HTTP URL（跳过 S3 下载时直接存的 URL）
+    # 直接 302 重定向，避免 storage.download_file 把 URL 当 S3 key
+    if storage_key.startswith(("http://", "https://")):
+        return RedirectResponse(url=storage_key, status_code=302)
+
     content = await storage.download_file(key=file_item.storage_key)
 
     filename = Path(file_item.storage_key).name or "download"
