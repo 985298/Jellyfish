@@ -52,6 +52,35 @@ router = APIRouter()
 _CHARACTER_NEGATIVE_PROMPT = "五官不一致，变脸，不同人物，肢体扭曲，裁切，特写错位，多余人物，场景环境，强烈阴影，文字，水印，透视，畸形手脚，服装错乱，模糊，低画质，动漫，二次元，3D渲染，卡通，手绘"
 
 
+# Template mapping: relation_type -> (template_category, negative_prompt)
+_TEMPLATE_MAP = {
+    "character_image": ("combined", _CHARACTER_NEGATIVE_PROMPT),
+    "actor_image": ("combined", _CHARACTER_NEGATIVE_PROMPT),
+    "scene_image": ("scene_image_front", _CHARACTER_NEGATIVE_PROMPT),
+    "prop_image": ("prop_image_front", _CHARACTER_NEGATIVE_PROMPT),
+    "costume_image": ("costume_image_front", _CHARACTER_NEGATIVE_PROMPT),
+}
+
+
+async def _apply_prompt_template(db, relation_type: str, prompt: str) -> tuple[str, str | None]:
+    """Apply prompt template based on relation_type. Returns (full_prompt, negative_prompt)."""
+    from app.models.studio_prompts_files_timeline import PromptTemplate
+    from sqlalchemy import select
+    mapping = _TEMPLATE_MAP.get(relation_type)
+    if not mapping:
+        return prompt, None
+    category, neg = mapping
+    # Look up template
+    row = (await db.execute(
+        select(PromptTemplate).where(PromptTemplate.category == category).limit(1)
+    )).scalars().first()
+    if row and row.content:
+        full = row.content.replace("{{description}}", prompt)
+    else:
+        full = prompt
+    return full, neg
+
+
 class StudioImageTaskRequest(BaseModel):
     """Studio 专用图片任务请求体：可选模型 ID，不传则用默认图片模型；供应商由模型反查。
 
@@ -203,6 +232,7 @@ async def create_actor_image_generation_task(
         relation_type=submission.relation_type,
         relation_entity_id=submission.relation_entity_id,
         prompt=submission.prompt,
+        negative_prompt=neg_prompt,
         images=ref_images if ref_images else None,
     )
     return created_response(TaskCreated(task_id=task_id))
@@ -253,6 +283,8 @@ async def create_asset_image_generation_task(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="prompt is required for asset image generation",
         )
+    # Apply prompt template + negative prompt based on asset type
+    prompt, neg_prompt = await _apply_prompt_template(db, submission.relation_type, prompt)
     submission = await _build_asset_image_submission_payload_service(
         db,
         asset_type=asset_type,
@@ -319,6 +351,8 @@ async def create_character_image_generation_task(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="prompt is required for character image generation",
         )
+    # Apply prompt template + negative prompt
+    prompt, neg_prompt = await _apply_prompt_template(db, "character_image", prompt)
     submission = await _build_character_image_submission_payload_service(
         db,
         character_id=character_id,
@@ -335,7 +369,7 @@ async def create_character_image_generation_task(
         prompt=submission.prompt,
         images=ref_images if ref_images else None,
         size="2048x1152",
-        negative_prompt=_CHARACTER_NEGATIVE_PROMPT,
+        negative_prompt=neg_prompt,
     )
     return created_response(TaskCreated(task_id=task_id))
 
