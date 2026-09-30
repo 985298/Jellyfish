@@ -3,8 +3,8 @@ export function getProjectChaptersPath(projectId: string) {
 }
 
 export function getChapterStudioPath(projectId: string, chapterId: string) {
-  // 重定向到新的一键制作流程页，老 Studio 页面已废弃
-  return `/projects/${projectId}/chapters/${chapterId}/pipeline`
+  // 老 Studio 页面已废弃，统一进入分镜列表页
+  return `/projects/${projectId}/chapters/${chapterId}/shots`
 }
 
 export function getChapterShotsPath(projectId: string, chapterId: string) {

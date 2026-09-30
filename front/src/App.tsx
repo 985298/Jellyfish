@@ -32,7 +32,7 @@ const App: React.FC = () => {
           <Route path="projects/:projectId" element={<ProjectWorkbench />} />
           <Route path="projects/:projectId/roles/:characterId/edit" element={<RoleDetailPage />} />
           <Route path="projects/:projectId/chapters/:chapterId/prep/*" element={<Navigate to="../shots" replace />} />
-<Route path="projects/:projectId/chapters/:chapterId/studio" element={<Navigate to="../pipeline" replace />} />
+<Route path="projects/:projectId/chapters/:chapterId/studio" element={<Navigate to="../shots" replace />} />
           <Route path="projects/:projectId/chapters/:chapterId/pipeline" element={<ChapterPipeline />} />
           <Route path="projects/:projectId/chapters/:chapterId/shots/:shotId/edit" element={<ChapterShotEditPage />} />
           <Route path="projects/:projectId/chapters/:chapterId/shots" element={<ChapterShotsPage />} />
