@@ -21,6 +21,12 @@ function normalizeUpdateImagePayload(payload: UpdateImagePayload): UpdateImagePa
   }
 }
 
+function updateImagePrimaryFactory(entityType: 'character' | 'scene' | 'prop' | 'costume') {
+  return async (id: string, imageId: number, isPrimary: boolean) => {
+    await StudioEntitiesApi.updateImage(entityType, id, imageId, { is_primary: isPrimary })
+  }
+}
+
 export const assetAdapters = {
   character: {
     missingAssetIdText: '缺少 character_id',
@@ -45,6 +51,7 @@ export const assetAdapters = {
     updateImage: async (id: string, imageId: number, payload) => {
       await StudioEntitiesApi.updateImage('character', id, imageId, normalizeUpdateImagePayload(payload))
     },
+    updateImagePrimary: updateImagePrimaryFactory('character'),
     renderPrompt: async (id: string, imageId: number) => {
       const res = await StudioImageTasksService.renderCharacterImagePromptApiV1StudioImageTasksCharactersCharacterIdRenderPromptPost({
         characterId: id,
@@ -87,6 +94,7 @@ export const assetAdapters = {
     updateImage: async (id: string, imageId: number, payload) => {
       await StudioEntitiesApi.updateImage('character', id, imageId, normalizeUpdateImagePayload(payload))
     },
+    updateImagePrimary: updateImagePrimaryFactory('character'),
     renderPrompt: async (id: string, imageId: number) => {
       const res = await StudioImageTasksService.renderCharacterImagePromptApiV1StudioImageTasksCharactersCharacterIdRenderPromptPost({
         characterId: id,

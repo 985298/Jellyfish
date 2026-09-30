@@ -33,3 +33,5 @@ front/_vite_log.txt
 .jellyfish.db-shm
 .jellyfish.db-wal
 .venv_check/
+backend/jellyfish.db-shm
+backend/jellyfish.db-wal

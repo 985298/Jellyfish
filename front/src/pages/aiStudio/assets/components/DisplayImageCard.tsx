@@ -11,6 +11,7 @@ type DisplayImageCardProps = {
   actions?: ReactNode[]
   meta?: ReactNode
   footer?: ReactNode
+  overlay?: ReactNode
   onImageClick?: () => void
   enablePreview?: boolean
   size?: 'small' | 'default'
@@ -27,6 +28,7 @@ export function DisplayImageCard({
   actions,
   meta,
   footer,
+  overlay,
   onImageClick,
   enablePreview = true,
   size = 'small',
@@ -56,7 +58,7 @@ export function DisplayImageCard({
     <>
       <Card title={title} extra={extra} actions={actions} size={size} hoverable={hoverable}>
         <div
-          className={`${imageHeightClassName} rounded-md border border-gray-200 bg-gray-50 flex items-center justify-center text-gray-500 text-sm overflow-hidden ${(onImageClick || (enablePreview && displayUrl)) ? 'cursor-pointer' : ''}`}
+          className={`${imageHeightClassName} rounded-md border border-gray-200 bg-gray-50 flex items-center justify-center text-gray-500 text-sm overflow-hidden relative ${(onImageClick || (enablePreview && displayUrl)) ? 'cursor-pointer' : ''}`}
           onClick={handleImageClick}
         >
           {displayUrl ? (
@@ -69,6 +71,9 @@ export function DisplayImageCard({
           ) : (
             placeholder
           )}
+          {overlay ? (
+            <div className="absolute top-1 right-1 z-10">{overlay}</div>
+          ) : null}
         </div>
         {meta ? <div className="mt-2">{meta}</div> : null}
         {footer ? <div className="mt-3">{footer}</div> : null}

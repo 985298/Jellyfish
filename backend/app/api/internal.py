@@ -9,13 +9,16 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from uuid import uuid4
-from app.schemas.common import ApiResponse, success_response
+from app.schemas.common import ApiResponse, PaginatedData, paginated_response, success_response
 from app.dependencies import get_db
 from app.config import settings
 from app.models.studio_projects import Project
 from app.models.studio import Character
 from app.models.studio import Chapter, Shot, ShotDetail
 from app.models.studio import Scene, Prop, Costume
+from app.schemas.studio.shots import ShotRead, ShotLinkedAssetItem
+from app.services.studio.shots import list_paginated as list_shots_paginated
+from app.services.studio.shot_assets import list_shot_linked_assets_paginated
 from pydantic import BaseModel, Field
 from typing import Optional
 
@@ -613,3 +616,106 @@ async def get_project_assets_internal(
         "assets": page_items,
         "has_more": has_more,
     })
+
+
+# ---------- Studio Shots 代理（供 Gateway 转发） ----------
+
+# 与公开 API 的排序白名单保持一致（见 app/api/v1/routes/studio/shots.py）
+INTERNAL_SHOT_ORDER_FIELDS = {"index", "title", "status", "created_at", "updated_at"}
+
+
+def _parse_project_ids(raw: str | None) -> set[str] | None:
+    """将逗号分隔的 project_ids 字符串解析为集合。
+
+    - None / 全空白 → 返回 None（表示不限制）。
+    - 非空但解析后无任何有效 ID → 返回空集合（表示空白名单，应返回空结果）。
+    """
+    if raw is None:
+        return None
+    parts = [p.strip() for p in raw.split(",")]
+    ids = {p for p in parts if p}
+    return ids
+
+
+@router.get(
+    "/v1/studio/shots",
+    response_model=ApiResponse[PaginatedData[ShotRead]],
+)
+async def list_shots_internal(
+    db: AsyncSession = Depends(get_db),
+    chapter_id: str | None = Query(None, description="按章节过滤"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(10, ge=1, le=100),
+    search: str | None = Query(None, description="关键字，过滤 title/script_excerpt"),
+    project_ids: str | None = Query(
+        None,
+        description="逗号分隔的项目 ID 白名单；非空时只返回这些项目下的镜头（供 Gateway 做租户隔离）",
+    ),
+    order: str | None = Query(None),
+    is_desc: bool = Query(False),
+) -> ApiResponse[PaginatedData[ShotRead]]:
+    """Gateway 调用：分页查询镜头（只读）。
+
+    - chapter_id 为空则返回所有镜头。
+    - search 模糊匹配 title/script_excerpt（与公开 API 的 q 参数语义一致）。
+    - project_ids 非空时按 ``chapter.project_id ∈ project_ids`` 过滤，用于 Gateway 租户隔离。
+    - 返回结构与公开 GET /api/v1/studio/shots 一致，便于前端直接复用。
+    """
+    pid_set = _parse_project_ids(project_ids)
+    if pid_set is not None and not pid_set:
+        # 显式传入空白名单 → 直接返回空分页，避免全量返回。
+        return paginated_response([], page=page, page_size=page_size, total=0)
+    return await list_shots_paginated(
+        db,
+        chapter_id=chapter_id,
+        q=search,
+        order=order,
+        is_desc=is_desc,
+        page=page,
+        page_size=page_size,
+        allow_fields=INTERNAL_SHOT_ORDER_FIELDS,
+        project_ids=pid_set,
+    )
+
+
+@router.get(
+    "/v1/studio/shots/{shot_id}/linked-assets",
+    response_model=ApiResponse[PaginatedData[ShotLinkedAssetItem]],
+)
+async def list_shot_linked_assets_internal(
+    shot_id: str,
+    db: AsyncSession = Depends(get_db),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(10, ge=1, le=100),
+    project_ids: str | None = Query(
+        None,
+        description="逗号分隔的项目 ID 白名单；非空时校验 shot 属于这些项目之一，否则返回 404（供 Gateway 做租户隔离）",
+    ),
+) -> ApiResponse[PaginatedData[ShotLinkedAssetItem]]:
+    """Gateway 调用：查询镜头关联的角色/道具/场景/服装（只读，分页）。
+
+    - 镜头不存在返回 404（由服务层 require_entity 抛出）。
+    - project_ids 非空时校验 ``shot.chapter.project_id ∈ project_ids``，不匹配返回 404，
+      用于 Gateway 租户隔离。
+    - 返回结构与公开 GET /api/v1/studio/shots/{shot_id}/linked-assets 一致。
+    """
+    pid_set = _parse_project_ids(project_ids)
+    if pid_set is not None:
+        # 即使白名单为空，也先查 shot 是否存在，避免把"镜头不存在"误报成 403/404 的歧义；
+        # 但既然白名单为空，任何 shot 都不属于白名单 → 直接 404。
+        shot = await db.get(Shot, shot_id)
+        if shot is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Shot not found")
+        chapter = await db.get(Chapter, shot.chapter_id)
+        chapter_pid = chapter.project_id if chapter is not None else None
+        if chapter_pid not in pid_set:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Shot not found for this tenant",
+            )
+    return await list_shot_linked_assets_paginated(
+        db,
+        shot_id=shot_id,
+        page=page,
+        page_size=page_size,
+    )

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Badge, Button, Card, Divider, Empty, Layout, List, Modal, Popconfirm, Segmented, Space, Spin, Tabs, Tooltip, Typography, message } from 'antd'
+import { Button, Card, Col, Divider, Empty, Layout, List, Modal, Popconfirm, Row, Segmented, Space, Spin, Tooltip, Typography, message } from 'antd'
 import { ArrowLeftOutlined, ClearOutlined, CloseCircleOutlined, ReloadOutlined } from '@ant-design/icons'
 import type {
   EntityNameExistenceItem,
@@ -39,7 +39,7 @@ import {
   useCancelableRelationTask,
 } from '../project/ProjectWorkbench/chapterDivisionTasks'
 import { StudioEntitiesApi } from '../../../services/studioEntities'
-import { resolveAssetUrl } from '../assets/utils'
+import { resolveAssetUrl, buildFileDownloadUrl } from '../assets/utils'
 
 const { Header, Content } = Layout
 const extractTaskCopy = TASK_COPY.scriptExtract
@@ -241,11 +241,8 @@ export function ChapterShotEditPage() {
   const [dialogAddingKeys, setDialogAddingKeys] = useState<Record<string, boolean>>({})
   const [batchDialogAdding, setBatchDialogAdding] = useState(false)
   const [candidateActionIds, setCandidateActionIds] = useState<Record<number, boolean>>({})
-  const [editorTabKey, setEditorTabKey] = useState<'basic' | 'confirm'>('basic')
   const [shotListFilter, setShotListFilter] = useState<ShotListFilter>('all')
   const dialogDebounceTimersRef = useRef<Map<number, number>>(new Map())
-  const tabAutoInitShotIdRef = useRef<string | null>(null)
-  const editorTabMemoryRef = useRef<Record<string, 'basic' | 'confirm'>>({})
 
   const shotsSorted = useMemo(
     () => [...shots].sort((a, b) => a.index - b.index),
@@ -1316,7 +1313,6 @@ export function ChapterShotEditPage() {
   const dialogsReady = extractedDialogLines.length === 0
   const statusReady = preparationState?.ready_for_generation ?? (shot?.status === 'ready')
   const basicInfoReady = hasTitleAndExcerpt && hasSemanticDefaults
-  const confirmReady = pendingConfirmCount === 0
   const currentShotActionable = shot ? isActionablePreparationShot(shot) || !basicInfoReady || !actionBeatsReady : false
   const extractionSummary = getShotExtractionSummary(shot)
   const extractionStateMeta = getExtractionStateMeta(shot, pendingConfirmCount)
@@ -1395,202 +1391,6 @@ export function ChapterShotEditPage() {
     },
   ] as const
 
-  useEffect(() => {
-    if (!shotId) return
-    if (loading || !shot) return
-    const rememberedTab = editorTabMemoryRef.current[shotId]
-    if (rememberedTab) {
-      if (editorTabKey !== rememberedTab) setEditorTabKey(rememberedTab)
-      tabAutoInitShotIdRef.current = shotId
-      return
-    }
-    if (tabAutoInitShotIdRef.current === shotId) return
-    setEditorTabKey(pendingConfirmCount > 0 ? 'confirm' : 'basic')
-    tabAutoInitShotIdRef.current = shotId
-  }, [editorTabKey, loading, pendingConfirmCount, shot, shotId])
-
-  const handleEditorTabChange = useCallback(
-    (key: string) => {
-      const nextKey = key as 'basic' | 'confirm'
-      setEditorTabKey(nextKey)
-      if (shotId) {
-        editorTabMemoryRef.current[shotId] = nextKey
-        tabAutoInitShotIdRef.current = shotId
-      }
-    },
-    [shotId],
-  )
-
-  const editorTabItems = [
-    {
-      key: 'basic',
-      label: (
-        <div className="flex items-center gap-2">
-          <span
-            className="inline-block h-2 w-2 rounded-full"
-            style={{ background: basicInfoReady ? '#22c55e' : '#f59e0b' }}
-          />
-          <span>1 基础信息</span>
-        </div>
-      ),
-      children: (
-        <ChapterShotBasicInfoSection
-          title={title}
-          scriptExcerpt={scriptExcerpt}
-          saving={saving}
-          semanticSaving={semanticSaving}
-          semantic={{
-            camera_shot: shotDetail?.camera_shot ?? undefined,
-            angle: shotDetail?.angle ?? undefined,
-            movement: shotDetail?.movement ?? undefined,
-            duration: shotDetail?.duration ?? 4,
-            action_beats: shotDetail?.action_beats ?? [],
-          }}
-          actionBeatPhases={preparationState?.action_beat_phases ?? []}
-          onTitleChange={setTitle}
-          onScriptExcerptChange={setScriptExcerpt}
-          onSemanticChange={updateShotSemantic}
-          onSave={() => void saveShot()}
-        />
-      ),
-    },
-    {
-      key: 'confirm',
-      label: (
-        <div className="flex items-center gap-2">
-          <span
-            className="inline-block h-2 w-2 rounded-full"
-            style={{ background: confirmReady ? '#22c55e' : '#f59e0b' }}
-          />
-          <span>2 提取确认</span>
-          {pendingConfirmCount > 0 ? <Badge count={pendingConfirmCount} size="small" /> : null}
-        </div>
-      ),
-      children: (
-        <div className="rounded-2xl border border-slate-200 bg-slate-50/70 px-4 py-4 space-y-4">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div className="min-w-0">
-              <div className="text-sm font-medium text-slate-900">提取确认工作区</div>
-              <div className="text-[11px] text-slate-500 mt-1">
-                这里集中处理系统提取出的资产和对白候选，确认完成后当前镜头才能真正进入生成阶段。
-              </div>
-              <div
-                className="mt-3 rounded-lg border px-3 py-2 text-xs"
-                style={{
-                  borderColor:
-                    extractionStateMeta.tone === 'green'
-                      ? '#86efac'
-                      : extractionStateMeta.tone === 'blue'
-                        ? '#93c5fd'
-                        : '#fcd34d',
-                  background:
-                    extractionStateMeta.tone === 'green'
-                      ? '#f0fdf4'
-                      : extractionStateMeta.tone === 'blue'
-                        ? '#eff6ff'
-                        : '#fffbeb',
-                  color:
-                    extractionStateMeta.tone === 'green'
-                      ? '#166534'
-                      : extractionStateMeta.tone === 'blue'
-                        ? '#1d4ed8'
-                        : '#92400e',
-                }}
-              >
-                <div className="font-medium">{extractionStateMeta.title}</div>
-                <div className="mt-1 opacity-90">{extractionStateMeta.description}</div>
-              </div>
-            </div>
-            <div className="flex items-center gap-2">
-              <Button
-                type="primary"
-                size="small"
-                loading={extractingAssets || extractTaskActive}
-                disabled={extractTaskActive}
-                onClick={() => void extractAssets()}
-              >
-                绑定资产
-              </Button>
-              {extractTask ? (
-                <Button
-                  size="small"
-                  danger
-                  icon={<CloseCircleOutlined />}
-                  disabled={extractTask.cancelRequested}
-                  onClick={() => void cancelExtractTask()}
-                >
-                  {extractTask.cancelRequested ? '正在取消' : '取消提取'}
-                </Button>
-              ) : null}
-              {shot?.skip_extraction ? (
-                <Button
-                  size="small"
-                  loading={skipExtractionUpdating}
-                  onClick={() => void updateSkipExtraction(false)}
-                >
-                  恢复提取
-                </Button>
-              ) : (
-                <Popconfirm
-                  title="确认标记为无需提取？"
-                  description="标记后当前镜头会直接按“提取确认已完成”处理。"
-                  okText="确认"
-                  cancelText="取消"
-                  onConfirm={() => void updateSkipExtraction(true)}
-                  okButtonProps={{ danger: true, loading: skipExtractionUpdating }}
-                  cancelButtonProps={{ disabled: skipExtractionUpdating }}
-                >
-                  <Button
-                    size="small"
-                    danger
-                    loading={skipExtractionUpdating}
-                  >
-                    无需提取
-                  </Button>
-                </Popconfirm>
-              )}
-            </div>
-          </div>
-
-          <ChapterShotAssetConfirmation
-            projectId={projectId}
-            extraction={extractionSummary}
-            unionAssets={unionAssets}
-            expandedKinds={expandedKinds}
-            candidateActionIds={candidateActionIds}
-            existenceByKindName={existenceByKindName}
-            onToggleExpanded={toggleExpanded}
-            onIgnoreCandidate={(asset) => void ignoreCandidate(asset)}
-            onHandleNewAsset={(asset) => void handleNewAsset(asset)}
-            selectedAssets={selectedAssets}
-            onToggleSelect={toggleAssetSelect}
-            onSelectAll={selectAllAssets}
-            onBatchGenerate={batchGenerateAssetImages}
-            batchLoading={batchAssetLoading}
-          />
-
-          <Divider className="!my-1" />
-          <ChapterShotDialogueConfirmation
-            extraction={extractionSummary}
-            savedDialogLines={savedDialogLines}
-            extractedDialogLines={extractedDialogLines}
-            batchDialogAdding={batchDialogAdding}
-            dialogLoading={dialogLoading}
-            dialogDeletingIds={dialogDeletingIds}
-            dialogAddingKeys={dialogAddingKeys}
-            onAcceptAll={() => void acceptAllExtractedDialogLines()}
-            onIgnoreAll={() => void ignoreAllExtractedDialogLines()}
-            onDeleteSavedDialogLine={(lineId) => void deleteSavedDialogLine(lineId)}
-            onUpdateSavedDialogText={updateSavedDialogText}
-            onAddExtractedDialogLine={(line) => void addExtractedDialogLine(line)}
-            onIgnoreExtractedDialogLine={(line) => void ignoreExtractedDialogLine(line)}
-            onUpdateExtractedDialogText={updateExtractedDialogText}
-          />
-        </div>
-      ),
-    },
-  ] as const
-
   return (
     <Layout style={{ height: '100%', minHeight: 0, background: '#eef2f7' }}>
       <Header
@@ -1658,7 +1458,7 @@ export function ChapterShotEditPage() {
           ) : !shot ? (
             <Empty description="无法加载分镜" />
           ) : (
-            <div style={{ flex: 1, minHeight: 0, display: 'flex', gap: 12, overflow: 'hidden' }}>
+            <div className="flex flex-col gap-3" style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
               <Card
                 size="small"
                 title={
@@ -1702,11 +1502,8 @@ export function ChapterShotEditPage() {
                   </div>
                 }
                 style={{
-                  width: 320,
-                  minWidth: 260,
-                  maxWidth: 420,
-                  height: '100%',
                   minHeight: 0,
+                  maxHeight: 280,
                   overflow: 'hidden',
                   display: 'flex',
                   flexDirection: 'column',
@@ -1847,37 +1644,229 @@ export function ChapterShotEditPage() {
                 />
               </Card>
 
-              <Card
-                size="small"
-                title={
-                  <div className="space-y-3 min-w-0">
-                    <div className="font-medium">{`镜头 #${shot.index} 详情`}</div>
-                    <ChapterShotPreparationGuide
-                      statusReady={statusReady}
-                      checklistItems={checklistItems}
-                      nextStepTitle={nextStepTitle}
-                      nextStepDescription={nextStepDescription}
-                      onGoToStudio={goToStudio}
-                    />
-                  </div>
-                }
-                style={{
-                  flex: 1,
-                  minWidth: 0,
-                  height: '100%',
-                  minHeight: 0,
-                  overflow: 'hidden',
-                  display: 'flex',
-                  flexDirection: 'column',
-                }}
-                bodyStyle={{ padding: 12, flex: 1, minHeight: 0, overflow: 'auto' }}
-              >
-                <Tabs
-                  activeKey={editorTabKey}
-                  onChange={handleEditorTabChange}
-                  items={editorTabItems as any}
-                />
-              </Card>
+              <ChapterShotPreparationGuide
+                statusReady={statusReady}
+                checklistItems={checklistItems}
+                nextStepTitle={nextStepTitle}
+                nextStepDescription={nextStepDescription}
+                onGoToStudio={goToStudio}
+              />
+
+              <Row gutter={[12, 12]} style={{ flex: 1, minHeight: 0, overflow: 'hidden' }} align="stretch" wrap={false}>
+                <Col xs={24} lg={8} style={{ minWidth: 0, height: '100%', display: 'flex' }}>
+                  <Card
+                    size="small"
+                    title={<div className="font-medium">基础信息与对白</div>}
+                    style={{ width: '100%', height: '100%', minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}
+                    bodyStyle={{ padding: 12, flex: 1, minHeight: 0, overflow: 'auto' }}
+                  >
+                    <div className="space-y-3">
+                      <ChapterShotBasicInfoSection
+                        title={title}
+                        scriptExcerpt={scriptExcerpt}
+                        saving={saving}
+                        semanticSaving={semanticSaving}
+                        semantic={{
+                          camera_shot: shotDetail?.camera_shot ?? undefined,
+                          angle: shotDetail?.angle ?? undefined,
+                          movement: shotDetail?.movement ?? undefined,
+                          duration: shotDetail?.duration ?? 4,
+                          action_beats: shotDetail?.action_beats ?? [],
+                        }}
+                        actionBeatPhases={preparationState?.action_beat_phases ?? []}
+                        onTitleChange={setTitle}
+                        onScriptExcerptChange={setScriptExcerpt}
+                        onSemanticChange={updateShotSemantic}
+                        onSave={() => void saveShot()}
+                      />
+                      <ChapterShotDialogueConfirmation
+                        extraction={extractionSummary}
+                        savedDialogLines={savedDialogLines}
+                        extractedDialogLines={extractedDialogLines}
+                        batchDialogAdding={batchDialogAdding}
+                        dialogLoading={dialogLoading}
+                        dialogDeletingIds={dialogDeletingIds}
+                        dialogAddingKeys={dialogAddingKeys}
+                        onAcceptAll={() => void acceptAllExtractedDialogLines()}
+                        onIgnoreAll={() => void ignoreAllExtractedDialogLines()}
+                        onDeleteSavedDialogLine={(lineId) => void deleteSavedDialogLine(lineId)}
+                        onUpdateSavedDialogText={updateSavedDialogText}
+                        onAddExtractedDialogLine={(line) => void addExtractedDialogLine(line)}
+                        onIgnoreExtractedDialogLine={(line) => void ignoreExtractedDialogLine(line)}
+                        onUpdateExtractedDialogText={updateExtractedDialogText}
+                      />
+                    </div>
+                  </Card>
+                </Col>
+
+                <Col xs={24} lg={8} style={{ minWidth: 0, height: '100%', display: 'flex' }}>
+                  <Card
+                    size="small"
+                    title={<div className="font-medium">资产绑定</div>}
+                    style={{ width: '100%', height: '100%', minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}
+                    bodyStyle={{ padding: 12, flex: 1, minHeight: 0, overflow: 'auto' }}
+                  >
+                    <div className="space-y-3">
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="text-sm font-medium text-slate-900">提取确认工作区</div>
+                          <div className="text-[11px] text-slate-500 mt-1">
+                            处理系统提取出的资产候选，确认完成后当前镜头才能真正进入生成阶段。
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Button
+                            type="primary"
+                            size="small"
+                            loading={extractingAssets || extractTaskActive}
+                            disabled={extractTaskActive}
+                            onClick={() => void extractAssets()}
+                          >
+                            绑定资产
+                          </Button>
+                          {extractTask ? (
+                            <Button
+                              size="small"
+                              danger
+                              icon={<CloseCircleOutlined />}
+                              disabled={extractTask.cancelRequested}
+                              onClick={() => void cancelExtractTask()}
+                            >
+                              {extractTask.cancelRequested ? '正在取消' : '取消提取'}
+                            </Button>
+                          ) : null}
+                          {shot?.skip_extraction ? (
+                            <Button
+                              size="small"
+                              loading={skipExtractionUpdating}
+                              onClick={() => void updateSkipExtraction(false)}
+                            >
+                              恢复提取
+                            </Button>
+                          ) : (
+                            <Popconfirm
+                              title="确认标记为无需提取？"
+                              description="标记后当前镜头会直接按“提取确认已完成”处理。"
+                              okText="确认"
+                              cancelText="取消"
+                              onConfirm={() => void updateSkipExtraction(true)}
+                              okButtonProps={{ danger: true, loading: skipExtractionUpdating }}
+                              cancelButtonProps={{ disabled: skipExtractionUpdating }}
+                            >
+                              <Button
+                                size="small"
+                                danger
+                                loading={skipExtractionUpdating}
+                              >
+                                无需提取
+                              </Button>
+                            </Popconfirm>
+                          )}
+                        </div>
+                      </div>
+
+                      <div
+                        className="rounded-lg border px-3 py-2 text-xs"
+                        style={{
+                          borderColor:
+                            extractionStateMeta.tone === 'green'
+                              ? '#86efac'
+                              : extractionStateMeta.tone === 'blue'
+                                ? '#93c5fd'
+                                : '#fcd34d',
+                          background:
+                            extractionStateMeta.tone === 'green'
+                              ? '#f0fdf4'
+                              : extractionStateMeta.tone === 'blue'
+                                ? '#eff6ff'
+                                : '#fffbeb',
+                          color:
+                            extractionStateMeta.tone === 'green'
+                              ? '#166534'
+                              : extractionStateMeta.tone === 'blue'
+                                ? '#1d4ed8'
+                                : '#92400e',
+                        }}
+                      >
+                        <div className="font-medium">{extractionStateMeta.title}</div>
+                        <div className="mt-1 opacity-90">{extractionStateMeta.description}</div>
+                      </div>
+
+                      <ChapterShotAssetConfirmation
+                        projectId={projectId}
+                        extraction={extractionSummary}
+                        unionAssets={unionAssets}
+                        expandedKinds={expandedKinds}
+                        candidateActionIds={candidateActionIds}
+                        existenceByKindName={existenceByKindName}
+                        onToggleExpanded={toggleExpanded}
+                        onIgnoreCandidate={(asset) => void ignoreCandidate(asset)}
+                        onHandleNewAsset={(asset) => void handleNewAsset(asset)}
+                        selectedAssets={selectedAssets}
+                        onToggleSelect={toggleAssetSelect}
+                        onSelectAll={selectAllAssets}
+                        onBatchGenerate={batchGenerateAssetImages}
+                        batchLoading={batchAssetLoading}
+                      />
+                    </div>
+                  </Card>
+                </Col>
+
+                <Col xs={24} lg={8} style={{ minWidth: 0, height: '100%', display: 'flex' }}>
+                  <Card
+                    size="small"
+                    title={<div className="font-medium">生成结果</div>}
+                    extra={
+                      <Tooltip title={statusReady ? '进入分镜工作室继续关键帧、图片和视频生成。' : '可以先进入工作室查看视频准备度；如需真正继续生成，建议先完成当前准备项。'}>
+                        <Button type={statusReady ? 'primary' : 'default'} size="small" onClick={goToStudio}>
+                          进入工作室
+                        </Button>
+                      </Tooltip>
+                    }
+                    style={{ width: '100%', height: '100%', minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}
+                    bodyStyle={{ padding: 12, flex: 1, minHeight: 0, overflow: 'auto' }}
+                  >
+                    <div className="space-y-4">
+                      <div>
+                        <div className="text-xs text-gray-600 mb-1">关键帧</div>
+                        <DisplayImageCard
+                          title={<div className="truncate">{shot.title?.trim() || `镜头 #${shot.index}`}</div>}
+                          imageUrl={resolveAssetUrl(shot.thumbnail ?? undefined)}
+                          imageAlt={shot.title?.trim() || 'frame'}
+                          enablePreview
+                          hoverable={false}
+                          size="small"
+                          imageHeightClassName="h-48"
+                          placeholder={
+                            <div className="text-center text-xs text-slate-500">
+                              尚未生成关键帧
+                              <div className="mt-1">请进入工作室继续生成</div>
+                            </div>
+                          }
+                        />
+                      </div>
+
+                      <div>
+                        <div className="text-xs text-gray-600 mb-1">视频</div>
+                        {shot.generated_video_file_id ? (
+                          <video
+                            className="w-full rounded bg-black"
+                            style={{ maxHeight: 260 }}
+                            src={buildFileDownloadUrl(shot.generated_video_file_id ?? undefined)}
+                            controls
+                            playsInline
+                          />
+                        ) : (
+                          <div className="rounded-lg border border-dashed border-slate-200 bg-white px-3 py-6 text-xs text-slate-500 text-center">
+                            尚未生成视频
+                            <div className="mt-1">请进入工作室继续生成</div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </Card>
+                </Col>
+              </Row>
             </div>
           )}
         </Card>

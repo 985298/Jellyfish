@@ -176,11 +176,19 @@ async def list_paginated(
     page: int,
     page_size: int,
     allow_fields: set[str],
+    project_ids: set[str] | None = None,
 ) -> ApiResponse[PaginatedData[ShotRead]]:
-    """分页查询镜头。"""
+    """分页查询镜头。
+
+    - project_ids 非空时按 ``chapter.project_id ∈ project_ids`` 过滤（用于 Gateway 租户隔离）。
+    """
     stmt = select(Shot)
     if chapter_id is not None:
         stmt = stmt.where(Shot.chapter_id == chapter_id)
+    if project_ids is not None:
+        stmt = stmt.join(Chapter, Shot.chapter_id == Chapter.id).where(
+            Chapter.project_id.in_(project_ids)
+        )
     stmt = apply_keyword_filter(stmt, q=q, fields=[Shot.title, Shot.script_excerpt])
     stmt = apply_order(
         stmt,

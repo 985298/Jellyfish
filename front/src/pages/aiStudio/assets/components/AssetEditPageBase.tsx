@@ -16,7 +16,7 @@ import {
   Typography,
   message,
 } from 'antd'
-import { ArrowLeftOutlined, CloseCircleOutlined, EditOutlined, ReloadOutlined } from '@ant-design/icons'
+import { ArrowLeftOutlined, CloseCircleOutlined, EditOutlined, ReloadOutlined, StarFilled, StarOutlined } from '@ant-design/icons'
 import { FilmService, ScriptProcessingService } from '../../../../services/generated'
 import type { TaskStatus } from '../../../../services/generated'
 import { listTaskLinksNormalized } from '../../../../services/filmTaskLinks'
@@ -90,6 +90,7 @@ export type BaseAssetImage = {
   width?: number | null
   height?: number | null
   format?: string | null
+  is_primary?: boolean | null
 }
 
 export type AssetEditPageBaseProps<TAsset extends BaseAsset, TImage extends BaseAssetImage> = {
@@ -103,6 +104,7 @@ export type AssetEditPageBaseProps<TAsset extends BaseAsset, TImage extends Base
   listImages: (assetId: string) => Promise<TImage[]>
   createImageSlot: (assetId: string, angle: AssetViewAngle) => Promise<void>
   updateImage: (assetId: string, imageId: number, payload: { file_id: string; width?: number | null; height?: number | null; format?: string | null }) => Promise<void>
+  updateImagePrimary?: (assetId: string, imageId: number, isPrimary: boolean) => Promise<void>
   renderPrompt: (assetId: string, imageId: number) => Promise<{ prompt: string; images: string[] }>
   createGenerationTask: (assetId: string, imageId: number, payload: { prompt: string; images: string[] }) => Promise<string | null>
   onNavigate: (to: string, replace?: boolean) => void
@@ -167,6 +169,7 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
   listImages,
   createImageSlot,
   updateImage,
+  updateImagePrimary,
   renderPrompt,
   createGenerationTask,
   onNavigate,
@@ -235,6 +238,8 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
   const [historyCandidates, setHistoryCandidates] = useState<HistoryCandidate<TImage>[]>([])
   const [editingSlotImage, setEditingSlotImage] = useState<TImage | null>(null)
   const [adoptingImageId, setAdoptingImageId] = useState<string | null>(null)
+  const [settingPrimaryImageId, setSettingPrimaryImageId] = useState<number | null>(null)
+  const canSetPrimary = relationType === 'character_image' && !!updateImagePrimary
   const smartDetectRelationType = useMemo(() => getSmartDetectRelationType(relationType), [relationType])
   const smartDetectRelationEntityId = useMemo(
     () => (assetId && smartDetectRelationType ? `${relationType}:${assetId}` : null),
@@ -730,6 +735,22 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
     }
   }
 
+  const handleSetPrimaryImage = async (image: TImage) => {
+    if (!assetId || !updateImagePrimary) return
+    if (image.is_primary) return
+
+    setSettingPrimaryImageId(image.id)
+    try {
+      await updateImagePrimary(assetId, image.id, true)
+      message.success('已设为主图')
+      await loadData()
+    } catch {
+      message.error('设为主图失败')
+    } finally {
+      setSettingPrimaryImageId(null)
+    }
+  }
+
   if (!assetId) {
     return (
       <Card>
@@ -859,7 +880,35 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
                       placeholder="暂无图片"
                       hoverable={false}
                       imageHeightClassName="aspect-video"
-                      extra={slot.image ? <Tag color="blue">ID {slot.image.id}</Tag> : null}
+                      extra={
+                        slot.image ? (
+                          <Space size="small">
+                            {slot.image.is_primary ? <Tag color="gold">主图</Tag> : null}
+                            <Tag color="blue">ID {slot.image.id}</Tag>
+                          </Space>
+                        ) : null
+                      }
+                      overlay={
+                        canSetPrimary && slot.image ? (() => {
+                          const isPrimary = Boolean(slot.image!.is_primary)
+                          return (
+                          <Button
+                            size="small"
+                            type={isPrimary ? 'primary' : 'default'}
+                            ghost={isPrimary}
+                            icon={isPrimary ? <StarFilled /> : <StarOutlined />}
+                            disabled={isPrimary}
+                            loading={settingPrimaryImageId === slot.image!.id}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              void handleSetPrimaryImage(slot.image!)
+                            }}
+                          >
+                            {isPrimary ? '已设主图' : '设为主图'}
+                          </Button>
+                          )
+                        })() : null
+                      }
                       footer={
                         <div className="flex items-center gap-2">
                           <Button

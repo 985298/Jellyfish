@@ -60,6 +60,9 @@ async def create_entity_image(
         raise HTTPException(status_code=404, detail=entity_not_found(spec.model.__name__))
 
     parsed = spec.image_create_model.model_validate(body).model_dump()
+    # 仅 CharacterImage 表有 is_primary 列；非 character 实体的表无此列。
+    if entity_type_norm != "character":
+        parsed.pop("is_primary", None)
     obj = spec.image_model(**{spec.id_field: entity_id, **parsed})
     db.add(obj)
     await db.flush()
@@ -92,6 +95,12 @@ async def update_entity_image(
         raise HTTPException(status_code=404, detail=entity_not_found(spec.image_model.__name__))
 
     update_data = spec.image_update_model.model_validate(body).model_dump(exclude_unset=True)
+
+    # 仅 CharacterImage 表有 is_primary 列；非 character 实体的表无此列，
+    # 必须剔除该字段，否则 setattr 会抛 AttributeError。
+    if entity_type_norm != "character":
+        update_data.pop("is_primary", None)
+
     for key, value in update_data.items():
         setattr(obj, key, value)
     await db.flush()

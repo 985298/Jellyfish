@@ -85,6 +85,8 @@ class AssetImageCreate(BaseModel):
     width: int | None = None
     height: int | None = None
     format: str = "png"
+    # 仅 CharacterImage 表有 is_primary 列；服务层在非 character 实体上会剔除该字段。
+    is_primary: bool = False
 
 
 class AssetImageUpdate(BaseModel):
@@ -94,6 +96,10 @@ class AssetImageUpdate(BaseModel):
     width: int | None = None
     height: int | None = None
     format: str | None = None
+    # 仅 CharacterImage 表有 is_primary 列；其他资产表无此列。
+    # update_entity_image 用 model_dump(exclude_unset=True)，其他资产不传该字段时不受影响。
+    # 服务层在 entity_type=='character' 且 is_primary=True 时会清除同角色其他主图。
+    is_primary: bool | None = None
 
 
 class SceneRead(AssetRead):
@@ -130,3 +136,4 @@ class CharacterImageRead(AssetImageBase):
     model_config = ConfigDict(from_attributes=True)
 
     character_id: str
+    is_primary: bool = False
