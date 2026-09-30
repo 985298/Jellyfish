@@ -218,6 +218,8 @@ async def create_actor_image_generation_task(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="prompt is required for actor generation",
         )
+    # Apply prompt template + negative prompt based on relation_type
+    prompt, neg_prompt = await _apply_prompt_template(db, "actor_image", prompt)
     submission = await _build_actor_image_submission_payload_service(
         db,
         actor_id=actor_id,

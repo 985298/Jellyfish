@@ -67,7 +67,6 @@ from app.services.studio.shot_extraction_draft import build_script_extraction_dr
 from app.schemas.studio.shots import (
     ProjectActorLinkRead,
     ProjectAssetLinkCreate,
-    ProjectCostumeLinkRead,
     ShotAssetsOverviewRead,
     ShotLinkedAssetItem,
     ShotCreate,
@@ -77,10 +76,8 @@ from app.schemas.studio.shots import (
     ShotDialogLineCreate,
     ShotDialogLineRead,
     ShotDialogLineUpdate,
-    ProjectPropLinkRead,
     ShotRead,
     ShotRuntimeSummaryRead,
-    ProjectSceneLinkRead,
     ShotUpdate,
     ShotFrameImageCreate,
     ShotFrameImageRead,
@@ -745,16 +742,16 @@ async def delete_project_actor_link(
 
 @links_router.post(
     "/scene",
-    response_model=ApiResponse[ProjectSceneLinkRead],
+    response_model=ApiResponse[dict],
     status_code=status.HTTP_201_CREATED,
-    summary="创建项目-章节-镜头-场景关联",
+    summary="创建项目-章节-镜头-场景关联（已废弃：改为直接写 Scene.project_id）",
 )
 async def create_project_scene_link(
     body: ProjectAssetLinkCreate,
     db: AsyncSession = Depends(get_db),
-) -> ApiResponse[ProjectSceneLinkRead]:
+) -> ApiResponse[dict]:
     obj = await create_project_asset_link_service(db, entity_type="scene", body=body)
-    return created_response(ProjectSceneLinkRead.model_validate(obj))
+    return created_response({"id": getattr(obj, "id", None), "scene_id": getattr(obj, "id", None), "project_id": body.project_id, "chapter_id": body.chapter_id, "shot_id": body.shot_id})
 
 
 
@@ -773,16 +770,16 @@ async def delete_project_scene_link(
 
 @links_router.post(
     "/prop",
-    response_model=ApiResponse[ProjectPropLinkRead],
+    response_model=ApiResponse[dict],
     status_code=status.HTTP_201_CREATED,
-    summary="创建项目-章节-镜头-道具关联",
+    summary="创建项目-章节-镜头-道具关联（已废弃：改为直接写 Prop.project_id）",
 )
 async def create_project_prop_link(
     body: ProjectAssetLinkCreate,
     db: AsyncSession = Depends(get_db),
-) -> ApiResponse[ProjectPropLinkRead]:
+) -> ApiResponse[dict]:
     obj = await create_project_asset_link_service(db, entity_type="prop", body=body)
-    return created_response(ProjectPropLinkRead.model_validate(obj))
+    return created_response({"id": getattr(obj, "id", None), "prop_id": getattr(obj, "id", None), "project_id": body.project_id, "chapter_id": body.chapter_id, "shot_id": body.shot_id})
 
 
 
@@ -801,16 +798,16 @@ async def delete_project_prop_link(
 
 @links_router.post(
     "/costume",
-    response_model=ApiResponse[ProjectCostumeLinkRead],
+    response_model=ApiResponse[dict],
     status_code=status.HTTP_201_CREATED,
-    summary="创建项目-章节-镜头-服装关联",
+    summary="创建项目-章节-镜头-服装关联（已废弃：改为直接写 Costume.project_id）",
 )
 async def create_project_costume_link(
     body: ProjectAssetLinkCreate,
     db: AsyncSession = Depends(get_db),
-) -> ApiResponse[ProjectCostumeLinkRead]:
+) -> ApiResponse[dict]:
     obj = await create_project_asset_link_service(db, entity_type="costume", body=body)
-    return created_response(ProjectCostumeLinkRead.model_validate(obj))
+    return created_response({"id": getattr(obj, "id", None), "costume_id": getattr(obj, "id", None), "project_id": body.project_id, "chapter_id": body.chapter_id, "shot_id": body.shot_id})
 
 
 @links_router.delete(

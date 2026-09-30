@@ -32,9 +32,6 @@ from app.models.studio import (
     ShotFrameImage,
     ShotFrameType,
     ProjectActorLink,
-    ProjectCostumeLink,
-    ProjectPropLink,
-    ProjectSceneLink,
     TimelineClip,
 )
 
@@ -49,9 +46,6 @@ __all__ = [
     "ShotFrameImage",
     "ShotFrameType",
     "ProjectActorLink",
-    "ProjectSceneLink",
-    "ProjectPropLink",
-    "ProjectCostumeLink",
     "ShotCharacterLink",
     "Actor",
     "Character",

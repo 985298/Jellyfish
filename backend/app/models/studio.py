@@ -21,9 +21,6 @@ from app.models.studio_projects import (
     Chapter,
     Project,
     ProjectActorLink,
-    ProjectCostumeLink,
-    ProjectPropLink,
-    ProjectSceneLink,
 )
 from app.models.studio_shots import (
     Shot,
@@ -99,9 +96,6 @@ __all__ = [
     "PropImage",
     "CostumeImage",
     "ProjectActorLink",
-    "ProjectSceneLink",
-    "ProjectPropLink",
-    "ProjectCostumeLink",
     "PromptTemplate",
     "FileItem",
     "FileUsage",

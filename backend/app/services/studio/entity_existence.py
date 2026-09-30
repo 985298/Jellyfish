@@ -12,13 +12,11 @@ from app.models.studio import (
     Chapter,
     Character,
     Costume,
-    ProjectCostumeLink,
-    ProjectPropLink,
-    ProjectSceneLink,
     Prop,
     Scene,
     Shot,
     ShotCharacterLink,
+    ShotDetail,
 )
 from app.services.common import relation_mismatch
 
@@ -63,43 +61,44 @@ async def check_names_existence(
         return str(row) if row is not None else None
 
     async def _find_linked_prop(q: str) -> tuple[int, str] | None:
+        # Phase 1.3：直接查 Prop.project_id 判定是否已绑定到项目（不再 join ProjectPropLink）。
+        # link_id 在中间表去留过渡期仍可能有调用方引用，统一回退 None（旧表不删，外部读取 link_id 的逻辑后续再清理）。
         stmt = (
-            select(ProjectPropLink.id, Prop.id)
-            .join(Prop, Prop.id == ProjectPropLink.prop_id)
-            .where(ProjectPropLink.project_id == project_id, Prop.name.ilike(f"%{q}%"))
+            select(Prop.id)
+            .where(Prop.project_id == project_id, Prop.name.ilike(f"%{q}%"))
             .limit(1)
         )
         row = (await db.execute(stmt)).first()
         if not row:
             return None
-        link_id, prop_id = row
-        return int(link_id), str(prop_id)
+        prop_id = str(row[0])
+        return None, prop_id
 
     async def _find_linked_scene(q: str) -> tuple[int, str] | None:
+        # Phase 1.3：直接查 Scene.project_id 判定是否已绑定到项目
         stmt = (
-            select(ProjectSceneLink.id, Scene.id)
-            .join(Scene, Scene.id == ProjectSceneLink.scene_id)
-            .where(ProjectSceneLink.project_id == project_id, Scene.name.ilike(f"%{q}%"))
+            select(Scene.id)
+            .where(Scene.project_id == project_id, Scene.name.ilike(f"%{q}%"))
             .limit(1)
         )
         row = (await db.execute(stmt)).first()
         if not row:
             return None
-        link_id, scene_id = row
-        return int(link_id), str(scene_id)
+        scene_id = str(row[0])
+        return None, scene_id
 
     async def _find_linked_costume(q: str) -> tuple[int, str] | None:
+        # Phase 1.3：直接查 Costume.project_id 判定是否已绑定到项目
         stmt = (
-            select(ProjectCostumeLink.id, Costume.id)
-            .join(Costume, Costume.id == ProjectCostumeLink.costume_id)
-            .where(ProjectCostumeLink.project_id == project_id, Costume.name.ilike(f"%{q}%"))
+            select(Costume.id)
+            .where(Costume.project_id == project_id, Costume.name.ilike(f"%{q}%"))
             .limit(1)
         )
         row = (await db.execute(stmt)).first()
         if not row:
             return None
-        link_id, costume_id = row
-        return int(link_id), str(costume_id)
+        costume_id = str(row[0])
+        return None, costume_id
 
     def _empty_item(raw: str) -> dict[str, Any]:
         return {
@@ -245,12 +244,9 @@ async def check_names_existence(
 
         prop_ids = {r["asset_id"] for r in props_out if r.get("asset_id")}
         if prop_ids:
-            stmt = select(ProjectPropLink.prop_id).where(
-                ProjectPropLink.project_id == project_id,
-                ProjectPropLink.shot_id == effective_shot_id,
-                ProjectPropLink.prop_id.in_(prop_ids),
-            )
-            linked_prop_ids = {row[0] for row in (await db.execute(stmt)).all()}
+            # Phase 3：中间表 project_prop_links 已删除，prop 与镜头的关联通过
+            # ShotDetail/项目维度判断（这里复用项目级绑定结果作为 shot 维度近似）。
+            linked_prop_ids = {aid for aid in prop_ids if aid in {r["asset_id"] for r in props_out if r.get("linked_to_project")}}
             for row in props_out:
                 aid = row.get("asset_id")
                 if aid and aid in linked_prop_ids:
@@ -258,12 +254,12 @@ async def check_names_existence(
 
         scene_ids = {r["asset_id"] for r in scenes_out if r.get("asset_id")}
         if scene_ids:
-            stmt = select(ProjectSceneLink.scene_id).where(
-                ProjectSceneLink.project_id == project_id,
-                ProjectSceneLink.shot_id == effective_shot_id,
-                ProjectSceneLink.scene_id.in_(scene_ids),
-            )
-            linked_scene_ids = {row[0] for row in (await db.execute(stmt)).all()}
+            # Phase 1.3：scene 与镜头是 1:1（ShotDetail.scene_id），直接读单值比对，
+            # 不再走 ProjectSceneLink 中间表反查 shot 维度关联
+            shot_scene_id = (
+                await db.execute(select(ShotDetail.scene_id).where(ShotDetail.id == effective_shot_id))
+            ).scalars().first()
+            linked_scene_ids = {shot_scene_id} if shot_scene_id else set()
             for row in scenes_out:
                 aid = row.get("asset_id")
                 if aid and aid in linked_scene_ids:
@@ -271,12 +267,9 @@ async def check_names_existence(
 
         costume_ids = {r["asset_id"] for r in costumes_out if r.get("asset_id")}
         if costume_ids:
-            stmt = select(ProjectCostumeLink.costume_id).where(
-                ProjectCostumeLink.project_id == project_id,
-                ProjectCostumeLink.shot_id == effective_shot_id,
-                ProjectCostumeLink.costume_id.in_(costume_ids),
-            )
-            linked_costume_ids = {row[0] for row in (await db.execute(stmt)).all()}
+            # Phase 3：中间表 project_costume_links 已删除，costume 与镜头的关联通过
+            # 项目维度判断（复用项目级绑定结果作为 shot 维度近似）。
+            linked_costume_ids = {aid for aid in costume_ids if aid in {r["asset_id"] for r in costumes_out if r.get("linked_to_project")}}
             for row in costumes_out:
                 aid = row.get("asset_id")
                 if aid and aid in linked_costume_ids:

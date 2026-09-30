@@ -134,6 +134,8 @@ export function useChapters(projectId: string | undefined) {
 }
 
 export function useProjectCharacters(projectId: string | undefined) {
+  // 项目角色记录；保留 any 以匹配后端返回的动态字典结构（与列表项一致）。
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [characters, setCharacters] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
 
@@ -145,13 +147,27 @@ export function useProjectCharacters(projectId: string | undefined) {
     }
     setLoading(true)
     try {
-      const res = await StudioEntitiesApi.list('character', {
-        page: 1,
-        pageSize: 100,
-        q: null,
-      })
-      const items = (res.data?.items ?? []).filter((x) => x.project_id === projectId)
-      setCharacters(items)
+      // 后端统一实体列表不支持按 project_id 过滤，前端分页拉取全部后再按项目过滤，
+      // 否则当全局角色数 >100 时项目角色可能漏掉，导致 RolesTab 显示为空。
+      // 同时按更新时间倒序拉取，与资产列表默认排序保持一致。
+      const fetchSize = 100
+      const all: Record<string, unknown>[] = []
+      let page = 1
+      for (let guard = 0; guard < 1000; guard++) {
+        const res = await StudioEntitiesApi.list('character', {
+          page,
+          pageSize: fetchSize,
+          q: null,
+          order: 'updated_at',
+          isDesc: true,
+        })
+        const items = (res.data?.items ?? []) as Record<string, unknown>[]
+        all.push(...items)
+        const total = res.data?.pagination?.total ?? 0
+        if (items.length === 0 || all.length >= total) break
+        page += 1
+      }
+      setCharacters(all.filter((x) => x.project_id === projectId))
     } catch {
       setCharacters([])
     } finally {

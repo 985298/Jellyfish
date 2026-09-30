@@ -11,7 +11,7 @@ from app.config import settings
 from app.dependencies import get_db
 from app.models.studio_shots import Shot, ShotExtractedCandidate, ShotCandidateStatus
 from app.models.studio_assets import Character, Scene, Prop, Costume
-from app.models.studio_projects import Chapter, ProjectSceneLink, ProjectPropLink, ProjectCostumeLink
+from app.models.studio_projects import Chapter
 from app.models.studio_shots import ShotCharacterLink
 from app.schemas.common import ApiResponse, success_response
 from app.services.studio.entity_crud import create_entity as _create_entity_crud

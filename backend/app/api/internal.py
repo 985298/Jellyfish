@@ -4,20 +4,43 @@ Internal endpoints for gateway-Jellyfish integration.
 Directly call Jellyfish service layer, avoiding HTTP internal calls.
 """
 import logging
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+import secrets
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from uuid import uuid4
 from app.schemas.common import ApiResponse, success_response
 from app.dependencies import get_db
+from app.config import settings
 from app.models.studio_projects import Project
 from app.models.studio import Character
 from app.models.studio import Chapter, Shot, ShotDetail
-from app.models.studio import Scene, Prop, Costume, ProjectSceneLink, ProjectPropLink, ProjectCostumeLink
+from app.models.studio import Scene, Prop, Costume
 from pydantic import BaseModel, Field
 from typing import Optional
 
-router = APIRouter()
+async def verify_internal_token(request: Request) -> None:
+    """校验 Gateway 内部调用携带的 X-Internal-Token。
+
+    与 settings.jellyfish_internal_token 比对，不匹配返回 403。
+    未配置 token 时 fail-closed（同样返回 403），避免内部接口在无认证下暴露。
+    使用 secrets.compare_digest 防止时序攻击。
+    """
+    expected = (settings.jellyfish_internal_token or "").strip()
+    if not expected:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Internal token not configured on server",
+        )
+    provided = request.headers.get("X-Internal-Token", "")
+    if not secrets.compare_digest(provided, expected):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Invalid internal token",
+        )
+
+
+router = APIRouter(dependencies=[Depends(verify_internal_token)])
 logger = logging.getLogger(__name__)
 
 class ProjectCreateInternal(BaseModel):
@@ -552,21 +575,24 @@ async def get_project_assets_internal(
             for row in result.scalars():
                 all_assets.append({"asset_id": row.id, "asset_type": "character", "name": row.name, "description": row.description, "style": row.style, "visual_style": row.visual_style})
         elif etype == "scene":
-            stmt = select(Scene).join(ProjectSceneLink, ProjectSceneLink.scene_id == Scene.id).where(ProjectSceneLink.project_id == project_id)
+            # Phase 1.3：直接查 Scene.project_id，不再走 ProjectSceneLink 中间表
+            stmt = select(Scene).where(Scene.project_id == project_id)
             if q:
                 stmt = stmt.where((Scene.name.ilike(f"%{q}%")) | (Scene.description.ilike(f"%{q}%")))
             result = await db.execute(stmt)
             for row in result.scalars():
                 all_assets.append({"asset_id": row.id, "asset_type": "scene", "name": row.name, "description": row.description, "style": row.style, "visual_style": row.visual_style})
         elif etype == "prop":
-            stmt = select(Prop).join(ProjectPropLink, ProjectPropLink.prop_id == Prop.id).where(ProjectPropLink.project_id == project_id)
+            # Phase 1.3：直接查 Prop.project_id，不再走 ProjectPropLink 中间表
+            stmt = select(Prop).where(Prop.project_id == project_id)
             if q:
                 stmt = stmt.where((Prop.name.ilike(f"%{q}%")) | (Prop.description.ilike(f"%{q}%")))
             result = await db.execute(stmt)
             for row in result.scalars():
                 all_assets.append({"asset_id": row.id, "asset_type": "prop", "name": row.name, "description": row.description, "style": row.style, "visual_style": row.visual_style})
         elif etype == "costume":
-            stmt = select(Costume).join(ProjectCostumeLink, ProjectCostumeLink.costume_id == Costume.id).where(ProjectCostumeLink.project_id == project_id)
+            # Phase 1.3：直接查 Costume.project_id，不再走 ProjectCostumeLink 中间表
+            stmt = select(Costume).where(Costume.project_id == project_id)
             if q:
                 stmt = stmt.where((Costume.name.ilike(f"%{q}%")) | (Costume.description.ilike(f"%{q}%")))
             result = await db.execute(stmt)

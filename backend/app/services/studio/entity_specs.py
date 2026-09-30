@@ -15,9 +15,6 @@ from app.models.studio import (
     Costume,
     CostumeImage,
     ProjectActorLink,
-    ProjectCostumeLink,
-    ProjectPropLink,
-    ProjectSceneLink,
     Prop,
     PropImage,
     Scene,
@@ -46,9 +43,6 @@ DEFAULT_VIEW_ANGLES: tuple[AssetViewAngle, ...] = (
 
 LINK_MODEL_BY_ENTITY: dict[str, tuple[type, str]] = {
     "actor": (ProjectActorLink, "actor_id"),
-    "scene": (ProjectSceneLink, "scene_id"),
-    "prop": (ProjectPropLink, "prop_id"),
-    "costume": (ProjectCostumeLink, "costume_id"),
 }
 
 

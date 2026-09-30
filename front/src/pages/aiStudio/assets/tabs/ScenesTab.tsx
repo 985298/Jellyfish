@@ -2,13 +2,14 @@ import { AssetTypeTab } from './AssetTypeTab'
 import { useNavigate } from 'react-router-dom'
 import { StudioEntitiesApi } from '../../../../services/studioEntities'
 
-export function ScenesTab() {
+export function ScenesTab({ projectId }: { projectId?: string } = {}) {
   const navigate = useNavigate()
 
   return (
     <AssetTypeTab
       label="场景"
       tabKey="scene"
+      projectId={projectId}
       listAssets={async ({ q, page, pageSize }) => {
         const res = await StudioEntitiesApi.list('scene', { q: q ?? null, page, pageSize })
         return { items: (res.data?.items ?? []) as any[], total: res.data?.pagination.total ?? 0 }

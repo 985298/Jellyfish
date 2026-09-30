@@ -35,6 +35,10 @@ class Settings(BaseSettings):
     redis_password: str | None = None
     celery_broker_url: str | None = None
 
+    # Internal API token：Gateway 调用 /internal/v1/* 接口时必须在 X-Internal-Token header 中携带
+    # 与 gateway 的 JELLYFISH_INTERNAL_TOKEN 保持一致；生产环境必须改为强随机值
+    jellyfish_internal_token: str = "dev-internal-token"
+
     # CORS：环境变量中建议使用逗号分隔（更贴近 docker-compose 用法）
     # 也兼容 JSON 数组：'["http://a","http://b"]'
     cors_origins: str = "http://localhost:7788,http://127.0.0.1:7788"

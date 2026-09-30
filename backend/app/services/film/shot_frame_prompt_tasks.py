@@ -19,9 +19,6 @@ from app.models.studio import (
     Chapter,
     Character,
     Costume,
-    ProjectCostumeLink,
-    ProjectPropLink,
-    ProjectSceneLink,
     Prop,
     Scene,
     Shot,
@@ -626,9 +623,6 @@ async def build_run_args(
             selectinload(Shot.character_links)
             .selectinload(ShotCharacterLink.character)
             .selectinload(Character.costume),
-            selectinload(Shot.scene_links).selectinload(ProjectSceneLink.scene),
-            selectinload(Shot.prop_links).selectinload(ProjectPropLink.prop),
-            selectinload(Shot.costume_links).selectinload(ProjectCostumeLink.costume),
         )
         .where(Shot.id == shot_id)
     )
@@ -667,21 +661,15 @@ async def build_run_args(
     detail_scene = getattr(detail, "scene", None)
     if detail_scene is not None:
         scenes_by_id[str(detail_scene.id)] = detail_scene
-    for link in list(getattr(shot, "scene_links", []) or []):
-        scene = getattr(link, "scene", None)
-        if scene is not None:
-            scenes_by_id[str(scene.id)] = scene
-    props = [
-        link.prop
-        for link in list(getattr(shot, "prop_links", []) or [])
-        if getattr(link, "prop", None) is not None
-    ]
-    costumes = [
-        link.costume
-        for link in list(getattr(shot, "costume_links", []) or [])
-        if getattr(link, "costume", None) is not None
-    ]
     scenes = list(scenes_by_id.values())
+    # Phase 3：中间表 project_scene_links / project_prop_links / project_costume_links 已删除，
+    # 镜头级 prop/costume 改为按项目维度聚合（与镜头项目一致即视为关联）。
+    project_id = getattr(project, "id", None)
+    props: list[Prop] = []
+    costumes: list[Costume] = []
+    if project_id is not None:
+        props = list((await db.execute(select(Prop).where(Prop.project_id == project_id).order_by(Prop.name))).scalars().all())
+        costumes = list((await db.execute(select(Costume).where(Costume.project_id == project_id).order_by(Costume.name))).scalars().all())
 
     continuity_guidance = _build_continuity_guidance(
         previous_shot=previous_shot,

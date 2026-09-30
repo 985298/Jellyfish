@@ -18,9 +18,6 @@ from app.models.studio import (
     Costume,
     CostumeImage,
     ProjectActorLink,
-    ProjectCostumeLink,
-    ProjectPropLink,
-    ProjectSceneLink,
     Prop,
     PropImage,
     Scene,
@@ -165,50 +162,50 @@ async def build_script_extraction_draft_for_shot(db: AsyncSession, shot_id: str)
                 )
             )
 
-    # ---------- Project*Link @ shot（保序去重） ----------
+    # ---------- 项目级资产（Phase 3：中间表已删除，改为按 project_id 直查） ----------
+    scene_ids: list[str] = []
+    if detail is not None and detail.scene_id:
+        scene_ids.append(detail.scene_id)
     psl_rows = (
         (
             await db.execute(
-                select(ProjectSceneLink).where(
-                    ProjectSceneLink.shot_id == shot_id,
-                    ProjectSceneLink.project_id == project_id,
-                ).order_by(ProjectSceneLink.id)
+                select(Scene.id).where(
+                    Scene.project_id == project_id,
+                ).order_by(Scene.id)
             )
         )
         .scalars()
         .all()
     )
-    scene_ids: list[str] = list(dict.fromkeys([x.scene_id for x in psl_rows if x.scene_id]))
-    if detail is not None and detail.scene_id and detail.scene_id not in scene_ids:
-        scene_ids.append(detail.scene_id)
+    for sid in psl_rows:
+        if sid and sid not in scene_ids:
+            scene_ids.append(sid)
 
     ppl_rows = (
         (
             await db.execute(
-                select(ProjectPropLink).where(
-                    ProjectPropLink.shot_id == shot_id,
-                    ProjectPropLink.project_id == project_id,
-                ).order_by(ProjectPropLink.id)
+                select(Prop.id).where(
+                    Prop.project_id == project_id,
+                ).order_by(Prop.id)
             )
         )
         .scalars()
         .all()
     )
-    prop_ids = list(dict.fromkeys([x.prop_id for x in ppl_rows if x.prop_id]))
+    prop_ids = list(dict.fromkeys([pid for pid in ppl_rows if pid]))
 
     pcl_rows = (
         (
             await db.execute(
-                select(ProjectCostumeLink).where(
-                    ProjectCostumeLink.shot_id == shot_id,
-                    ProjectCostumeLink.project_id == project_id,
-                ).order_by(ProjectCostumeLink.id)
+                select(Costume.id).where(
+                    Costume.project_id == project_id,
+                ).order_by(Costume.id)
             )
         )
         .scalars()
         .all()
     )
-    costume_ids = list(dict.fromkeys([x.costume_id for x in pcl_rows if x.costume_id]))
+    costume_ids = list(dict.fromkeys([cid for cid in pcl_rows if cid]))
 
     scene_media = await resolve_thumbnail_infos(
         db,

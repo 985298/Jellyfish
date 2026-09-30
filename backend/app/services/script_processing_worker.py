@@ -34,9 +34,6 @@ from app.models.studio import (
     Chapter,
     Costume,
     Project,
-    ProjectCostumeLink,
-    ProjectPropLink,
-    ProjectSceneLink,
     ProjectStyle,
     ProjectVisualStyle,
     Prop,
@@ -279,33 +276,29 @@ def _existing_asset_id_by_name(db: Session, *, model: type, name: str) -> str | 
     return str(row) if row is not None else None
 
 
-def _ensure_project_link(
+def _ensure_asset_project_id(
     db: Session,
     *,
-    link_model: type,
-    asset_field: str,
+    model: type,
     asset_id: str,
     project_id: str,
 ) -> None:
-    """Idempotently ensure a project-level link row exists (chapter/shot = None)."""
-    asset_col = getattr(link_model, asset_field)
-    stmt = select(link_model.id).where(
-        asset_col == asset_id,
-        link_model.project_id == project_id,
-        link_model.chapter_id.is_(None),
-        link_model.shot_id.is_(None),
+    """Idempotently ensure an asset row carries this project_id.
+
+    Phase 3：中间表 project_scene_links / project_prop_links / project_costume_links
+    已删除，改为直接维护 Scene/Prop/Costume.project_id。
+    """
+    stmt = select(model.id).where(
+        model.id == asset_id,
+        model.project_id == project_id,
     ).limit(1)
     existing = db.execute(stmt).scalar_one_or_none()
     if existing is not None:
         return
-    db.add(
-        link_model(
-            project_id=project_id,
-            chapter_id=None,
-            shot_id=None,
-            **{asset_field: asset_id},
-        )
-    )
+    asset = db.get(model, asset_id)
+    if asset is None:
+        return
+    asset.project_id = project_id
     db.flush()
 
 
@@ -372,12 +365,14 @@ class AssetExtractTaskExecutor(AbstractWorkerTaskExecutor):
                 logger.exception("asset_extract: failed to persist character %r for project %s", name, project_id)
 
         # Assets: scene/prop/costume share the same shape; idempotent by name (global unique).
+        # Phase 3：中间表 project_scene_links / project_prop_links / project_costume_links 已删除，
+        # 改为直接写 Scene/Prop/Costume.project_id（不再通过 link_model 旁挂）。
         asset_specs = (
-            (Scene, "scene", ProjectSceneLink, "scene_id"),
-            (Prop, "prop", ProjectPropLink, "prop_id"),
-            (Costume, "costume", ProjectCostumeLink, "costume_id"),
+            (Scene, "scene"),
+            (Prop, "prop"),
+            (Costume, "costume"),
         )
-        for model, label, link_model, asset_field in asset_specs:
+        for model, label in asset_specs:
             items = list(getattr(result, f"{label}s", []) or [])
             for item in items:
                 name = str(getattr(item, "name", "") or "").strip()
@@ -387,10 +382,9 @@ class AssetExtractTaskExecutor(AbstractWorkerTaskExecutor):
                     existing_id = _existing_asset_id_by_name(ctx.db, model=model, name=name)
                     if existing_id is not None:
                         # Ensure the existing asset is linked to this project.
-                        _ensure_project_link(
+                        _ensure_asset_project_id(
                             ctx.db,
-                            link_model=link_model,
-                            asset_field=asset_field,
+                            model=model,
                             asset_id=existing_id,
                             project_id=project_id,
                         )
@@ -411,16 +405,10 @@ class AssetExtractTaskExecutor(AbstractWorkerTaskExecutor):
                             tags=tags,
                             view_count=view_count,
                             prompt_template_id=None,
+                            project_id=project_id,
                         )
                     )
                     ctx.db.flush()
-                    _ensure_project_link(
-                        ctx.db,
-                        link_model=link_model,
-                        asset_field=asset_field,
-                        asset_id=asset_id,
-                        project_id=project_id,
-                    )
                     created_counts[label] += 1
                 except Exception:
                     logger.exception("asset_extract: failed to persist %s %r for project %s", label, name, project_id)

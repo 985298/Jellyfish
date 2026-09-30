@@ -24,6 +24,13 @@ class Scene(Base, TimestampMixin):
         comment="计划为该场景生成的视角图片数量（不含分镜帧）",
     )
     tags: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list, comment="标签")
+    project_id: Mapped[str | None] = mapped_column(
+        String(64),
+        ForeignKey("projects.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+        comment="所属项目 ID（可空；项目删除时资产保留但标记为游离）",
+    )
     prompt_template_id: Mapped[str | None] = mapped_column(
         String(64),
         ForeignKey("prompt_templates.id", ondelete="SET NULL"),
@@ -68,6 +75,13 @@ class Prop(Base, TimestampMixin):
         comment="计划为该道具生成的视角图片数量（不含分镜帧）",
     )
     tags: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list, comment="标签")
+    project_id: Mapped[str | None] = mapped_column(
+        String(64),
+        ForeignKey("projects.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+        comment="所属项目 ID（可空；项目删除时资产保留但标记为游离）",
+    )
     prompt_template_id: Mapped[str | None] = mapped_column(
         String(64),
         ForeignKey("prompt_templates.id", ondelete="SET NULL"),
@@ -117,6 +131,13 @@ class Costume(Base, TimestampMixin):
         comment="计划为该服装生成的视角图片数量（不含分镜帧）",
     )
     tags: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list, comment="标签")
+    project_id: Mapped[str | None] = mapped_column(
+        String(64),
+        ForeignKey("projects.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+        comment="所属项目 ID（可空；项目删除时资产保留但标记为游离）",
+    )
     prompt_template_id: Mapped[str | None] = mapped_column(
         String(64),
         ForeignKey("prompt_templates.id", ondelete="SET NULL"),

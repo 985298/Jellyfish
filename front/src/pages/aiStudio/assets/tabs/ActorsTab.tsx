@@ -8,7 +8,7 @@ import { DisplayImageCard } from '../components/DisplayImageCard'
 import { ActorEntityFormModal, type ActorEntityLike } from '../components/ActorEntityFormModal'
 import { useBatchAssetImageGeneration } from '../hooks/useBatchAssetImageGeneration'
 
-export function ActorsTab() {
+export function ActorsTab({ projectId: propProjectId }: { projectId?: string } = {}) {
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const [actors, setActors] = useState<any[]>([])
@@ -26,7 +26,9 @@ export function ActorsTab() {
     chapterId: string
     shotId: string
   } | null>(null)
-  const projectId = searchParams.get('projectId')?.trim() ?? ''
+  const urlProjectId = searchParams.get('projectId')?.trim() ?? ''
+  // 顶部项目选择器（propProjectId）优先；兼容 URL 中携带的 projectId（shot 内新建场景）
+  const projectId = propProjectId ?? urlProjectId
   const createProjectId = fromShotCreateContext?.projectId ?? projectId
 
   const batch = useBatchAssetImageGeneration('character')
@@ -37,16 +39,41 @@ export function ActorsTab() {
       const nextPage = opts?.page ?? page
       const nextPageSize = opts?.pageSize ?? pageSize
       const q = typeof opts?.q === 'string' ? opts.q : search.trim() || undefined
-      const res = await StudioEntitiesApi.list('character', {
-        page: nextPage,
-        pageSize: nextPageSize,
-        q: q ?? null,
-        order: 'updated_at',
-        isDesc: true,
-      })
-      const items = res.data?.items ?? []
-      setActors(items)
-      setTotal(res.data?.pagination.total ?? 0)
+      if (projectId) {
+        // 选中项目时：后端统一实体列表不支持 project_id 过滤，前端拉取全部后按项目过滤，
+        // 再用客户端分页展示，避免分页错位（服务端分页 + 客户端过滤不一致）。
+        const all: Record<string, unknown>[] = []
+        let p = 1
+        const fetchSize = 100
+        for (let guard = 0; guard < 200; guard++) {
+          const res = await StudioEntitiesApi.list('character', {
+            page: p,
+            pageSize: fetchSize,
+            q: q ?? null,
+            order: 'updated_at',
+            isDesc: true,
+          })
+          const items = (res.data?.items ?? []) as Record<string, unknown>[]
+          all.push(...items)
+          const serverTotal = res.data?.pagination?.total ?? 0
+          if (items.length === 0 || all.length >= serverTotal) break
+          p += 1
+        }
+        const projectActors = all.filter((a) => a.project_id === projectId)
+        setActors(projectActors as unknown as typeof actors)
+        setTotal(projectActors.length)
+      } else {
+        const res = await StudioEntitiesApi.list('character', {
+          page: nextPage,
+          pageSize: nextPageSize,
+          q: q ?? null,
+          order: 'updated_at',
+          isDesc: true,
+        })
+        const items = res.data?.items ?? []
+        setActors(items)
+        setTotal(res.data?.pagination.total ?? 0)
+      }
     } catch {
       message.error('加载演员失败')
     } finally {
@@ -55,8 +82,18 @@ export function ActorsTab() {
   }
 
   useEffect(() => {
+    // 项目模式：分页是客户端切片，仅 projectId 变化时重新拉取全量；
+    // 非项目模式：page/pageSize 变化时拉取对应服务端页。
+    if (projectId) return
     void load()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page, pageSize])
+
+  useEffect(() => {
+    // projectId 变化（含进入/退出项目模式）时重新拉取。
+    void load()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId])
 
   useEffect(() => {
     const create = searchParams.get('create')
@@ -85,7 +122,16 @@ export function ActorsTab() {
     }
   }, [searchParams, setSearchParams])
 
-  const filtered = useMemo(() => actors, [actors])
+  const filtered = useMemo(() => {
+    // 选中项目时 actors 为该项目全部角色（客户端过滤），做客户端分页切片与底部 Pagination 联动；
+    // 未选项目时 actors 为服务端当前页数据，直接展示。
+    if (projectId) {
+      const arr = Array.isArray(actors) ? actors : []
+      const start = (page - 1) * pageSize
+      return arr.slice(start, start + pageSize)
+    }
+    return Array.isArray(actors) ? actors : []
+  }, [actors, projectId, page, pageSize])
 
   const toggleSelect = (id: string, checked: boolean) => {
     setSelectedIds((prev) => {
@@ -285,8 +331,9 @@ export function ActorsTab() {
           if (createdItem && page === 1 && !search.trim()) {
             setActors((prev) => [createdItem, ...prev.filter((it) => it.id !== createdItem.id)])
             setTotal((prev) => prev + 1)
+          } else {
+            await load({ page: 1 })
           }
-          await load({ page: 1 })
           setPage(1)
         }}
       />

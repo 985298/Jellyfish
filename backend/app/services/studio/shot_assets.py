@@ -11,24 +11,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.utils import apply_order, paginate
 from app.models.studio import (
     Actor,
+    Chapter,
     Character,
     Costume,
     ProjectActorLink,
-    ProjectCostumeLink,
-    ProjectPropLink,
-    ProjectSceneLink,
     Prop,
     Scene,
     Shot,
     ShotCharacterLink,
+    ShotDetail,
 )
 from app.schemas.common import ApiResponse, PaginatedData, paginated_response
 from app.schemas.studio.shots import (
     ProjectAssetLinkCreate,
     ProjectActorLinkRead,
-    ProjectCostumeLinkRead,
-    ProjectPropLinkRead,
-    ProjectSceneLinkRead,
     ShotLinkedAssetItem,
 )
 from app.services.common import delete_if_exists, entity_not_found, invalid_choice, require_entity
@@ -47,30 +43,6 @@ def _link_spec(entity_type: str) -> dict[str, Any]:
             "read_model": ProjectActorLinkRead,
             "asset_model": Actor,
             "not_found": entity_not_found("Actor"),
-        }
-    if t == "scene":
-        return {
-            "model": ProjectSceneLink,
-            "field": "scene_id",
-            "read_model": ProjectSceneLinkRead,
-            "asset_model": Scene,
-            "not_found": entity_not_found("Scene"),
-        }
-    if t == "prop":
-        return {
-            "model": ProjectPropLink,
-            "field": "prop_id",
-            "read_model": ProjectPropLinkRead,
-            "asset_model": Prop,
-            "not_found": entity_not_found("Prop"),
-        }
-    if t == "costume":
-        return {
-            "model": ProjectCostumeLink,
-            "field": "costume_id",
-            "read_model": ProjectCostumeLinkRead,
-            "asset_model": Costume,
-            "not_found": entity_not_found("Costume"),
         }
     raise HTTPException(status_code=400, detail=invalid_choice("entity_type", ["actor", "scene", "prop", "costume"]))
 
@@ -143,20 +115,29 @@ async def list_shot_linked_assets(
     shot_id: str,
 ) -> list[ShotLinkedAssetItem]:
     """获取镜头关联的角色/道具/场景/服装。"""
-    await require_entity(db, Shot, shot_id, detail=entity_not_found("Shot"), status_code=400)
+    shot = await require_entity(db, Shot, shot_id, detail=entity_not_found("Shot"), status_code=400)
+    chapter = await db.get(Chapter, shot.chapter_id)
+    project_id = chapter.project_id if chapter is not None else None
 
     character_ids = (
         await db.execute(select(ShotCharacterLink.character_id).where(ShotCharacterLink.shot_id == shot_id))
     ).scalars().all()
-    prop_ids = (
-        await db.execute(select(ProjectPropLink.prop_id).where(ProjectPropLink.shot_id == shot_id))
-    ).scalars().all()
-    scene_ids = (
-        await db.execute(select(ProjectSceneLink.scene_id).where(ProjectSceneLink.shot_id == shot_id))
-    ).scalars().all()
-    costume_ids = (
-        await db.execute(select(ProjectCostumeLink.costume_id).where(ProjectCostumeLink.shot_id == shot_id))
-    ).scalars().all()
+    # Phase 1.3：scene_id 直接取自 ShotDetail（1:1 关联，镜头唯一），不再走 ProjectSceneLink
+    scene_id_from_detail = (
+        await db.execute(select(ShotDetail.scene_id).where(ShotDetail.id == shot_id))
+    ).scalars().first()
+    scene_ids = [scene_id_from_detail] if scene_id_from_detail else []
+    # Phase 3：中间表 project_prop_links / project_costume_links 已删除，
+    # 镜头级 prop/costume 关联改为查 Prop.project_id / Costume.project_id（与镜头项目一致即视为关联）。
+    prop_ids: list[str] = []
+    costume_ids: list[str] = []
+    if project_id is not None:
+        prop_ids = (
+            await db.execute(select(Prop.id).where(Prop.project_id == project_id))
+        ).scalars().all()
+        costume_ids = (
+            await db.execute(select(Costume.id).where(Costume.project_id == project_id))
+        ).scalars().all()
 
     character_ids = [x for x in dict.fromkeys(character_ids) if x]
     prop_ids = [x for x in dict.fromkeys(prop_ids) if x]

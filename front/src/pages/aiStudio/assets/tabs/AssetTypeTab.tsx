@@ -38,6 +38,7 @@ export function AssetTypeTab({
   updateAsset,
   deleteAsset,
   onEditAsset,
+  projectId,
 }: {
   label: string
   tabKey: 'scene' | 'prop' | 'costume'
@@ -46,6 +47,7 @@ export function AssetTypeTab({
   updateAsset: (id: string, payload: AssetMutationPayload) => Promise<StudioAssetLike>
   deleteAsset: (id: string) => Promise<void>
   onEditAsset?: (asset: StudioAssetLike) => void
+  projectId?: string
 }) {
   const [searchParams, setSearchParams] = useSearchParams()
   const [assets, setAssets] = useState<StudioAssetLike[]>([])
@@ -74,8 +76,15 @@ export function AssetTypeTab({
   const [previewTitle, setPreviewTitle] = useState('')
 
   const filtered = useMemo(() => {
-    return Array.isArray(assets) ? assets : []
-  }, [assets])
+    const arr = Array.isArray(assets) ? assets : []
+    // 选中项目时 assets 已是该项目全部资产（客户端过滤），需做客户端分页切片，
+    // 与底部 Pagination 联动；未选项目时 assets 为服务端当前页数据，直接展示。
+    if (projectId) {
+      const start = (page - 1) * pageSize
+      return arr.slice(start, start + pageSize)
+    }
+    return arr
+  }, [assets, projectId, page, pageSize])
 
   const batch = useBatchAssetImageGeneration(tabKey)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
@@ -113,10 +122,28 @@ export function AssetTypeTab({
       const nextPage = opts?.page ?? page
       const nextPageSize = opts?.pageSize ?? pageSize
       const nextQ = typeof opts?.q === 'string' ? opts.q : search.trim() || undefined
-      const res = await listAssets({ q: nextQ, page: nextPage, pageSize: nextPageSize })
-      const items = Array.isArray(res.items) ? res.items.map(normalizeAsset) : []
-      setAssets(items)
-      setTotal(res.total)
+      if (projectId) {
+        // 选中项目时：后端列表不支持 project_id 过滤，前端拉取全部后按项目过滤，
+        // 再用客户端分页展示，避免分页错位（服务端分页 + 客户端过滤不一致）。
+        const all: StudioAssetLike[] = []
+        let p = 1
+        const fetchSize = 100
+        for (let guard = 0; guard < 200; guard++) {
+          const res = await listAssets({ q: nextQ, page: p, pageSize: fetchSize })
+          const items = Array.isArray(res.items) ? res.items.map(normalizeAsset) : []
+          all.push(...items)
+          if (items.length === 0 || all.length >= (res.total ?? 0)) break
+          p += 1
+        }
+        const filteredAll = all.filter((a) => (a as Record<string, unknown>).project_id === projectId)
+        setAssets(filteredAll)
+        setTotal(filteredAll.length)
+      } else {
+        const res = await listAssets({ q: nextQ, page: nextPage, pageSize: nextPageSize })
+        const items = Array.isArray(res.items) ? res.items.map(normalizeAsset) : []
+        setAssets(items)
+        setTotal(res.total)
+      }
     } catch {
       message.error('加载资产失败')
     } finally {
@@ -125,8 +152,18 @@ export function AssetTypeTab({
   }
 
   useEffect(() => {
+    // 项目模式：分页是客户端切片，仅 projectId 变化时重新拉取全量；
+    // 非项目模式：page/pageSize 变化时拉取对应服务端页。
+    if (projectId) return
     void load()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page, pageSize])
+
+  useEffect(() => {
+    // projectId 变化（含进入/退出项目模式）时重新拉取。
+    void load()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId])
 
   const openCreate = () => {
     setEditing(null)
@@ -258,7 +295,7 @@ export function AssetTypeTab({
             刷新
           </Button>
           <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
-            新建${label}
+            {`新建${label}`}
           </Button>
         </Space>
       </div>
@@ -374,7 +411,7 @@ export function AssetTypeTab({
         label={label}
         entityType={tabKey}
         editing={editing}
-        linkProjectId={fromShotCreateContext?.projectId}
+        linkProjectId={fromShotCreateContext?.projectId ?? projectId}
         linkChapterId={fromShotCreateContext?.chapterId}
         linkShotId={fromShotCreateContext?.shotId}
         createAsset={createAsset}

@@ -18,6 +18,7 @@ class AssetBase(BaseModel):
     view_count: int = Field(1, ge=1, description="计划为该资产生成的视角图片数量（不含分镜帧）")
     style: ProjectStyle = Field(ProjectStyle.real_people_city, description="题材/风格")
     visual_style: ProjectVisualStyle = Field(ProjectVisualStyle.live_action, description="画面表现形式（现实/动漫等）")
+    project_id: str | None = Field(None, description="所属项目 ID（可空；与中间表 project_*_link 共存）")
 
 
 class AssetCreate(BaseModel):

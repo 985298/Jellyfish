@@ -53,6 +53,7 @@ export function useBatchAssetImageGeneration(adapterKey: AdapterKey) {
       setTaskIdsByAsset(p => ({ ...p, [asset.id]: taskId }))
       let settled = false
       stopFlagsRef.current[asset.id] = () => { settled = true }
+      let lastStatus: TaskStatus = 'pending'
       for (let i = 0; i < 30; i++) {
         if (settled) break
         await new Promise(r => setTimeout(r, 2000))
@@ -60,15 +61,15 @@ export function useBatchAssetImageGeneration(adapterKey: AdapterKey) {
           const res = await FilmService.getTaskStatusApiV1FilmTasksTaskIdStatusGet({ taskId })
           const status = res.data?.status
           if (!status) continue
+          lastStatus = status
           const next: AssetGenState = { taskId, status, progress: res.data?.progress ?? 0, cancelRequested: res.data?.cancel_requested ?? false }
           setGenStates(p => ({ ...p, [asset.id]: next }))
           if (isTerminal(status)) break
         } catch {}
       }
-      const final = genStates[asset.id] ?? initial
-      return final.status === 'succeeded' ? { outcome: 'succeeded' as const } : final.status === 'cancelled' ? { outcome: 'cancelled' as const } : { outcome: 'failed' as const }
+      return lastStatus === 'succeeded' ? { outcome: 'succeeded' as const } : lastStatus === 'cancelled' ? { outcome: 'cancelled' as const } : { outcome: 'failed' as const }
     } catch { return { outcome: 'failed' as const } }
-  }, [adapterKey, genStates])
+  }, [adapterKey])
 
   const generate = useCallback(async (assets: BatchAssetLike[], opts?: { parallel?: number }): Promise<BatchOutcome> => {
     const parallel = opts?.parallel ?? 3

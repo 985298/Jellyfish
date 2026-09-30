@@ -84,24 +84,6 @@ class Shot(Base,TimestampMixin):
         passive_deletes=True,
         order_by="ProjectActorLink.id",
     )
-    scene_links: Mapped[list["ProjectSceneLink"]] = relationship(
-        back_populates="shot",
-        cascade="all, delete-orphan",
-        passive_deletes=True,
-        order_by="ProjectSceneLink.id",
-    )
-    prop_links: Mapped[list["ProjectPropLink"]] = relationship(
-        back_populates="shot",
-        cascade="all, delete-orphan",
-        passive_deletes=True,
-        order_by="ProjectPropLink.id",
-    )
-    costume_links: Mapped[list["ProjectCostumeLink"]] = relationship(
-        back_populates="shot",
-        cascade="all, delete-orphan",
-        passive_deletes=True,
-        order_by="ProjectCostumeLink.id",
-    )
     character_links: Mapped[list["ShotCharacterLink"]] = relationship(
         back_populates="shot",
         cascade="all, delete-orphan",

@@ -2,13 +2,14 @@ import { AssetTypeTab } from './AssetTypeTab'
 import { useNavigate } from 'react-router-dom'
 import { StudioEntitiesApi } from '../../../../services/studioEntities'
 
-export function CostumesTab() {
+export function CostumesTab({ projectId }: { projectId?: string } = {}) {
   const navigate = useNavigate()
 
   return (
     <AssetTypeTab
       label="服装"
       tabKey="costume"
+      projectId={projectId}
       listAssets={async ({ q, page, pageSize }) => {
         const res = await StudioEntitiesApi.list('costume', { q: q ?? null, page, pageSize })
         return { items: (res.data?.items ?? []) as any[], total: res.data?.pagination.total ?? 0 }

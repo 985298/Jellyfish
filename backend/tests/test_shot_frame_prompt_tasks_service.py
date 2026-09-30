@@ -15,9 +15,6 @@ from app.models.studio import (
     Costume,
     DialogueLineMode,
     Project,
-    ProjectCostumeLink,
-    ProjectPropLink,
-    ProjectSceneLink,
     ProjectStyle,
     ProjectVisualStyle,
     Prop,
@@ -70,6 +67,7 @@ async def _seed_shot_graph(db: AsyncSession) -> None:
         description="修身长款、利落",
         style=ProjectStyle.real_people_city,
         visual_style=ProjectVisualStyle.live_action,
+        project_id="p1",
     )
     character = Character(
         id="char-1",
@@ -87,6 +85,7 @@ async def _seed_shot_graph(db: AsyncSession) -> None:
         description="昏暗、潮湿、狭长",
         style=ProjectStyle.real_people_city,
         visual_style=ProjectVisualStyle.live_action,
+        project_id="p1",
     )
     prop = Prop(
         id="prop-1",
@@ -94,6 +93,7 @@ async def _seed_shot_graph(db: AsyncSession) -> None:
         description="金属外壳，冷白光束",
         style=ProjectStyle.real_people_city,
         visual_style=ProjectVisualStyle.live_action,
+        project_id="p1",
     )
     detail = ShotDetail(
         id="s1",
@@ -135,9 +135,6 @@ async def _seed_shot_graph(db: AsyncSession) -> None:
         speaker_name="主角",
     )
     shot_character_link = ShotCharacterLink(shot_id="s1", character_id="char-1", index=0)
-    scene_link = ProjectSceneLink(project_id="p1", chapter_id="c1", shot_id="s1", scene_id="scene-1")
-    prop_link = ProjectPropLink(project_id="p1", chapter_id="c1", shot_id="s1", prop_id="prop-1")
-    costume_link = ProjectCostumeLink(project_id="p1", chapter_id="c1", shot_id="s1", costume_id="costume-1")
     db.add_all(
         [
             project,
@@ -155,9 +152,6 @@ async def _seed_shot_graph(db: AsyncSession) -> None:
             next_detail,
             line,
             shot_character_link,
-            scene_link,
-            prop_link,
-            costume_link,
         ]
     )
     await db.commit()

@@ -239,27 +239,6 @@ class ProjectActorLinkRead(ProjectLinkBase):
     thumbnail: str = Field("", description="演员缩略图下载地址")
 
 
-class ProjectSceneLinkRead(ProjectLinkBase):
-    model_config = ConfigDict(from_attributes=True)
-
-    scene_id: str
-    thumbnail: str = Field("", description="场景缩略图下载地址")
-
-
-class ProjectPropLinkRead(ProjectLinkBase):
-    model_config = ConfigDict(from_attributes=True)
-
-    prop_id: str
-    thumbnail: str = Field("", description="道具缩略图下载地址")
-
-
-class ProjectCostumeLinkRead(ProjectLinkBase):
-    model_config = ConfigDict(from_attributes=True)
-
-    costume_id: str
-    thumbnail: str = Field("", description="服装缩略图下载地址")
-
-
 class ShotFrameImageBase(BaseModel):
     id: int = Field(..., description="图片行 ID")
     shot_detail_id: str = Field(..., description="所属镜头细节 ID")

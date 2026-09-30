@@ -8,12 +8,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.utils import normalize_q
 from app.models.studio import (
     Chapter,
+    Character,
     FileItem,
     FileUsage,
     ProjectActorLink,
-    ProjectCostumeLink,
-    ProjectPropLink,
-    ProjectSceneLink,
+    Prop,
+    Scene,
+    Costume,
     Shot,
 )
 from app.models.types import FileUsageKind
@@ -103,8 +104,6 @@ async def sync_usage_from_character(
     usage_kind: FileUsageKind | str,
     source_ref: str | None = None,
 ) -> FileUsage | None:
-    from app.models.studio import Character
-
     char = await session.get(Character, character_id)
     if char is None:
         return None
@@ -232,21 +231,37 @@ async def list_files_by_scope_paginated(
 
 
 async def first_project_id_for_scene(session: AsyncSession, scene_id: str) -> str | None:
-    stmt = select(ProjectSceneLink.project_id).where(ProjectSceneLink.scene_id == scene_id).limit(1)
-    return (await session.execute(stmt)).scalars().first()
+    # Phase 3：中间表 project_scene_links 已删除，直接读 Scene.project_id。
+    scene = await session.get(Scene, scene_id)
+    if scene is not None and scene.project_id is not None:
+        return scene.project_id
+    return None
 
 
 async def first_project_id_for_prop(session: AsyncSession, prop_id: str) -> str | None:
-    stmt = select(ProjectPropLink.project_id).where(ProjectPropLink.prop_id == prop_id).limit(1)
-    return (await session.execute(stmt)).scalars().first()
+    # Phase 3：中间表 project_prop_links 已删除，直接读 Prop.project_id。
+    prop = await session.get(Prop, prop_id)
+    if prop is not None and prop.project_id is not None:
+        return prop.project_id
+    return None
 
 
 async def first_project_id_for_costume(session: AsyncSession, costume_id: str) -> str | None:
-    stmt = select(ProjectCostumeLink.project_id).where(ProjectCostumeLink.costume_id == costume_id).limit(1)
-    return (await session.execute(stmt)).scalars().first()
+    # Phase 3：中间表 project_costume_links 已删除，直接读 Costume.project_id。
+    costume = await session.get(Costume, costume_id)
+    if costume is not None and costume.project_id is not None:
+        return costume.project_id
+    return None
 
 
 async def first_project_id_for_actor(session: AsyncSession, actor_id: str) -> str | None:
+    # Phase 1.3：Actor 表无 project_id 字段，仍需通过 ProjectActorLink 反查。
+    # 为减少对中间表的强依赖，优先用 Character.actor_id 关联反查 project_id（Character 表有 project_id）；
+    # 若未命中再回退到 ProjectActorLink（保留旧路径作为双写期 fallback）。
+    stmt_char = select(Character.project_id).where(Character.actor_id == actor_id).limit(1)
+    pid = (await session.execute(stmt_char)).scalars().first()
+    if pid is not None:
+        return pid
     stmt = select(ProjectActorLink.project_id).where(ProjectActorLink.actor_id == actor_id).limit(1)
     return (await session.execute(stmt)).scalars().first()
 
