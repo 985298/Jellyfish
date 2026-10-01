@@ -39,6 +39,84 @@ async def check_entity_names_existence(
     return success_response(EntityNameExistenceCheckResponse.model_validate(data))
 
 
+# ---- 类型化图片全局列表（scene_images / prop_images / costume_images） ----
+# 注意：必须声明在 `/{entity_type}` 这类动态路径之前，否则 FastAPI 会把
+# `scene_images` 当作 entity_type 参数，先匹配到 list_entities（→ 400 invalid_choice）。
+@router.get(
+    "/scene_images",
+    response_model=ApiResponse[PaginatedData[dict[str, Any]]],
+    summary="场景图片全局列表（分页）",
+)
+async def list_scene_images(
+    db: AsyncSession = Depends(get_db),
+    entity_id: str | None = Query(None, description="按场景 ID 过滤；缺省返回全部场景图片"),
+    order: str | None = Query(None),
+    is_desc: bool = Query(False),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+) -> ApiResponse[PaginatedData[dict[str, Any]]]:
+    service = StudioEntitiesService(db)
+    payload, total = await service.list_asset_images(
+        entity_type="scene",
+        entity_id=entity_id,
+        order=order,
+        is_desc=is_desc,
+        page=page,
+        page_size=page_size,
+    )
+    return paginated_response(payload, page=page, page_size=page_size, total=total)
+
+
+@router.get(
+    "/prop_images",
+    response_model=ApiResponse[PaginatedData[dict[str, Any]]],
+    summary="道具图片全局列表（分页）",
+)
+async def list_prop_images(
+    db: AsyncSession = Depends(get_db),
+    entity_id: str | None = Query(None, description="按道具 ID 过滤；缺省返回全部道具图片"),
+    order: str | None = Query(None),
+    is_desc: bool = Query(False),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+) -> ApiResponse[PaginatedData[dict[str, Any]]]:
+    service = StudioEntitiesService(db)
+    payload, total = await service.list_asset_images(
+        entity_type="prop",
+        entity_id=entity_id,
+        order=order,
+        is_desc=is_desc,
+        page=page,
+        page_size=page_size,
+    )
+    return paginated_response(payload, page=page, page_size=page_size, total=total)
+
+
+@router.get(
+    "/costume_images",
+    response_model=ApiResponse[PaginatedData[dict[str, Any]]],
+    summary="服装图片全局列表（分页）",
+)
+async def list_costume_images(
+    db: AsyncSession = Depends(get_db),
+    entity_id: str | None = Query(None, description="按服装 ID 过滤；缺省返回全部服装图片"),
+    order: str | None = Query(None),
+    is_desc: bool = Query(False),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+) -> ApiResponse[PaginatedData[dict[str, Any]]]:
+    service = StudioEntitiesService(db)
+    payload, total = await service.list_asset_images(
+        entity_type="costume",
+        entity_id=entity_id,
+        order=order,
+        is_desc=is_desc,
+        page=page,
+        page_size=page_size,
+    )
+    return paginated_response(payload, page=page, page_size=page_size, total=total)
+
+
 @router.get("/{entity_type}", response_model=ApiResponse[PaginatedData[dict[str, Any]]], summary="统一实体列表（分页）")
 async def list_entities(
     entity_type: str,

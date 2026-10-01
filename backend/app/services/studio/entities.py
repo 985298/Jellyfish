@@ -15,6 +15,7 @@ from app.services.studio.entity_existence import check_names_existence as check_
 from app.services.studio.entity_images import (
     create_entity_image as create_entity_image_service,
     delete_entity_image as delete_entity_image_service,
+    list_asset_images_paginated,
     list_entity_images_paginated,
     update_entity_image as update_entity_image_service,
 )
@@ -104,6 +105,26 @@ class StudioEntitiesService:
         page_size: int,
     ) -> tuple[list[dict[str, object]], int]:
         return await list_entity_images_paginated(
+            self._db,
+            entity_type=entity_type,
+            entity_id=entity_id,
+            order=order,
+            is_desc=is_desc,
+            page=page,
+            page_size=page_size,
+        )
+
+    async def list_asset_images(
+        self,
+        *,
+        entity_type: str,
+        entity_id: str | None,
+        order: str | None,
+        is_desc: bool,
+        page: int,
+        page_size: int,
+    ) -> tuple[list[dict[str, object]], int]:
+        return await list_asset_images_paginated(
             self._db,
             entity_type=entity_type,
             entity_id=entity_id,

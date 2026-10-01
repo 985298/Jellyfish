@@ -46,6 +46,40 @@ async def list_entity_images_paginated(
     return payload, total
 
 
+async def list_asset_images_paginated(
+    db: AsyncSession,
+    *,
+    entity_type: str,
+    entity_id: str | None,
+    order: str | None,
+    is_desc: bool,
+    page: int,
+    page_size: int,
+) -> tuple[list[dict[str, Any]], int]:
+    """全局列出某类资产（scene/prop/costume）的图片，可选按 entity_id 过滤。
+
+    与 ``list_entity_images_paginated`` 的区别：
+    - 不要求 ``entity_id`` 必填，缺省时返回该类型全部图片；
+    - 不对父实体做存在性校验（``entity_id`` 仅作为过滤条件，无匹配时返回空列表）。
+    """
+    spec = entity_spec(entity_type)
+    stmt = select(spec.image_model)
+    if entity_id:
+        id_field = getattr(spec.image_model, spec.id_field)
+        stmt = stmt.where(id_field == entity_id)
+    stmt = apply_order(
+        stmt,
+        model=spec.image_model,
+        order=order,
+        is_desc=is_desc,
+        allow_fields=IMAGE_ORDER_FIELDS,
+        default="id",
+    )
+    items, total = await paginate(db, stmt=stmt, page=page, page_size=page_size)
+    payload = [spec.image_read_model.model_validate(x).model_dump() for x in items]
+    return payload, total
+
+
 async def create_entity_image(
     db: AsyncSession,
     *,

@@ -125,6 +125,7 @@ from app.services.studio.entity_existence import check_names_existence
 from app.services.studio.entity_images import (
     create_entity_image,
     delete_entity_image,
+    list_asset_images_paginated,
     list_entity_images_paginated,
     update_entity_image,
 )
@@ -169,6 +170,7 @@ __all__ = [
     "get_shot",
     "list_files_paginated",
     "list_entity_images_paginated",
+    "list_asset_images_paginated",
     "list_entities_paginated",
     "list_project_asset_links_paginated",
     "list_shot_character_links",
