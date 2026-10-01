@@ -177,9 +177,14 @@ class Orchestrator:
                 action = await self._fallback_next_stage(ctx)
 
             if action == "completed":
-                if on_progress:
-                    on_progress({"stage": "completed", "status": "completed"})
-                break
+                # Don't trust "completed" if stages remain uncompleted
+                next_stage = _next_uncompleted_stage(completed_stages)
+                if next_stage is not None:
+                    action = next_stage
+                else:
+                    if on_progress:
+                        on_progress({"stage": "completed", "status": "completed"})
+                    break
 
             # 跳过已完成的阶段，自动推进到下一个未完成阶段
             if action in completed_stages:
