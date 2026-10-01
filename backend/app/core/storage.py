@@ -245,6 +245,14 @@ async def upload_file(
 
 async def download_file(*, key: str) -> bytes:
     """下载文件内容（整个对象读入内存）。"""
+    # If the key is a full URL (CDN), download directly via httpx
+    if key.startswith("http://") or key.startswith("https://"):
+        import httpx
+        resp = await to_thread.run_sync(lambda: httpx.get(key, timeout=120, follow_redirects=True))
+        if resp.status_code != 200:
+            raise FileNotFoundError(f"CDN download failed ({resp.status_code}): {key}")
+        return resp.content
+
     if not _check_s3_available() or settings.s3_bucket_name is None:
         path = _local_path(key)
         if not path.exists():
