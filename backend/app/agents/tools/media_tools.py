@@ -12,6 +12,7 @@ from sqlalchemy.orm import selectinload
 from app.agents.tools.base import Tool
 from app.core.db import async_session_maker
 from app.models.studio import Shot, ShotFrameImage
+from app.models.studio_projects import Project
 from app.services.studio.image_task_runner import create_image_task_and_link
 
 if TYPE_CHECKING:
@@ -102,10 +103,26 @@ class GenerateFrameTool(Tool):
 
 class GenerateVideoInput(BaseModel):
     shot_id: str = Field(description="shot id")
-    reference_mode: str = Field(default="first_frame", description="reference mode for video generation")
+    reference_mode: str = Field(default="first", description="reference mode: first / last / key / first_last / first_last_key / text_only")
     prompt: str | None = Field(default=None, description="video prompt")
     images: list[str] = Field(default_factory=list, description="reference image file ids")
     ratio: str | None = Field(default=None, description="video aspect ratio")
+
+    @field_validator("reference_mode", mode="before")
+    @classmethod
+    def normalize_reference_mode(cls, v):
+        """Map 'first_frame' -> 'first', 'last_frame' -> 'last', etc."""
+        if isinstance(v, str):
+            v = v.lower().strip()
+            if v in ("first", "last", "key", "first_last", "first_last_key", "text_only"):
+                return v
+            if "text" in v: return "text_only"
+            if "first" in v and "last" in v and "key" in v: return "first_last_key"
+            if "first" in v and "last" in v: return "first_last"
+            if "first" in v: return "first"
+            if "last" in v: return "last"
+            if "key" in v: return "key"
+        return v or "first"
 
 
 class GenerateVideoTool(Tool):
@@ -118,6 +135,10 @@ class GenerateVideoTool(Tool):
         async with async_session_maker() as db:
             # Replicate internal.py:450-460 logic — build run_args, create task,
             # add GenerationTaskLink, mark shot generating, commit, enqueue.
+            ratio = data.ratio
+            if not ratio:
+                project = await db.get(Project, ctx.project_id)
+                ratio = getattr(project, 'default_video_ratio', None) or '9:16'
             from app.api.v1.routes.film.common import _CreateOnlyTask
             from app.core.task_manager import (
                 DeliveryMode,
@@ -129,14 +150,18 @@ class GenerateVideoTool(Tool):
             from app.services.studio.shot_status import mark_shot_generating
             from app.tasks.execute_task import enqueue_task_execution
 
-            run_args = await build_vg_run_args(
-                db,
-                shot_id=data.shot_id,
-                reference_mode=data.reference_mode,
-                prompt=data.prompt,
-                images=data.images,
-                ratio=data.ratio,
-            )
+            try:
+                run_args = await build_vg_run_args(
+                    db,
+                    shot_id=data.shot_id,
+                    reference_mode=data.reference_mode,
+                    prompt=data.prompt,
+                    images=data.images,
+                    ratio=ratio,
+                )
+            except Exception as exc:
+                return {'error': str(exc)[:300], 'shot_id': data.shot_id,
+                        'hint': 'Frame images may not be ready yet. Use check_task_status to verify.'}
             task_kind = "video_generation"
             resource_type = "video"
             relation_type = "shot_video"
