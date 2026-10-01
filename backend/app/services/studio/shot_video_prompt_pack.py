@@ -334,15 +334,46 @@ def _build_screen_direction_guidance(
     return "；".join(guidance)
 
 
+_MOVEMENT_INSTRUCTIONS = {
+    "static": "镜头固定不动，保持稳定构图",
+    "pan": "镜头水平摇移，从左到右或从右到左缓缓扫过场景",
+    "tilt": "镜头垂直俯仰，从上向下或从下向上缓缓移动",
+    "push": "镜头缓慢推近，逐渐放大主体，增强情绪聚焦",
+    "pull": "镜头缓慢拉远，逐渐展现更广阔的画面，释放空间感",
+    "tracking": "镜头跟踪移动，跟随人物运动，保持动态感",
+}
+
+_SHOT_TYPE_CN = {
+    "ecu": "极特写", "cu": "特写", "ms": "中景",
+    "fs": "全景", "ws": "广角全景", "els": "远景",
+}
+
+_ANGLE_CN = {
+    "eye_level": "平视", "high_angle": "俯拍",
+    "low_angle": "仰拍", "dutch": "荷兰角倾斜",
+}
+
+
+def _camera_instruction(pack: ShotVideoPromptPackRead) -> str:
+    shot = _SHOT_TYPE_CN.get((pack.camera.camera_shot or "").lower(), pack.camera.camera_shot or "")
+    angle = _ANGLE_CN.get((pack.camera.angle or "").lower(), pack.camera.angle or "")
+    mov = (pack.camera.movement or "").lower()
+    mov_desc = _MOVEMENT_INSTRUCTIONS.get(mov, "")
+    parts = [f"景别{shot}", f"机位{angle}"]
+    if mov_desc:
+        parts.append(mov_desc)
+    return "，".join(parts)
+
+
 def _fallback_video_prompt(pack: ShotVideoPromptPackRead) -> str:
     style_text = "，".join(x for x in [pack.visual_style, pack.style] if x)
-    camera_text = " / ".join(x for x in [pack.camera.camera_shot, pack.camera.angle, pack.camera.movement] if x)
+    camera_text = _camera_instruction(pack)
     parts = [
         f"镜头标题：{pack.title}",
         f"剧本摘录：{pack.script_excerpt}",
         f"动作节拍：{'；'.join(pack.action_beats)}" if pack.action_beats else "",
         f"画面风格：{style_text}",
-        f"镜头语言：{camera_text}",
+        f"运镜指令：{camera_text}",
         f"时长：{pack.camera.duration} 秒" if pack.camera.duration else "",
         f"场景：{pack.scene.name if pack.scene else ''}",
         f"角色：{'、'.join(item.name for item in pack.characters)}",
