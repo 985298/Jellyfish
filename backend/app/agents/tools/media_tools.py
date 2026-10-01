@@ -194,7 +194,63 @@ class GenerateVideoTool(Tool):
                     e,
                 )
         return {
-            "task_id": task_record.id,
-            "shot_id": data.shot_id,
-            "task_kind": task_kind,
+        "task_id": task_record.id,
+        "shot_id": data.shot_id,
+        "task_kind": task_kind,
         }
+class GenerateVideosBatchInput(BaseModel):
+    shot_ids: list[str] = Field(default_factory=list, description="shot ids (auto-queries all chapter shots if empty)")
+    reference_mode: str = Field(default="first", description="first / last / key / first_last / first_last_key / text_only")
+    @field_validator("reference_mode", mode="before")
+    @classmethod
+    def normalize_reference_mode(cls, v):
+        if isinstance(v, str):
+            v = v.lower().strip()
+            if v in ("first", "last", "key", "first_last", "first_last_key", "text_only"): return v
+            if "text" in v: return "text_only"
+            if "first" in v and "last" in v and "key" in v: return "first_last_key"
+            if "first" in v and "last" in v: return "first_last"
+            if "first" in v: return "first"
+            if "last" in v: return "last"
+            if "key" in v: return "key"
+        return v or "first"
+class GenerateVideosBatchTool(Tool):
+    name = "generate_videos_batch"
+    description = "Submit video generation tasks for ALL shots at once (parallel). Prefer over calling generate_video multiple times."
+    input_model = GenerateVideosBatchInput
+    async def execute(self, ctx: AgentContext, **kwargs) -> dict:
+        data = GenerateVideosBatchInput(**kwargs)
+        async with async_session_maker() as db:
+            from app.api.v1.routes.film.common import _CreateOnlyTask
+            from app.core.task_manager import DeliveryMode, SqlAlchemyTaskStore, TaskManager
+            from app.models.task_links import GenerationTaskLink
+            from app.models.studio_projects import Project
+            from app.services.film.generated_video import build_run_args as build_vg_run_args
+            from app.services.studio.shot_status import mark_shot_generating
+            from app.tasks.execute_task import enqueue_task_execution
+            ratio = getattr(await db.get(Project, ctx.project_id), "default_video_ratio", None) or "9:16"
+            shot_ids = data.shot_ids
+            if not shot_ids and ctx.chapter_id:
+                shot_ids = [str(r) for r in (await db.execute(select(Shot.id).where(Shot.chapter_id == ctx.chapter_id).order_by(Shot.index))).scalars().all()]
+            results = []
+            succeeded = 0
+            failed = 0
+            for sid in shot_ids:
+                try:
+                    run_args = await build_vg_run_args(db, shot_id=sid, reference_mode=data.reference_mode, prompt=None, images=[], ratio=ratio)
+                    store = SqlAlchemyTaskStore(db)
+                    tm = TaskManager(store=store, strategies={})
+                    task_record = await tm.create(task=_CreateOnlyTask(), mode=DeliveryMode.async_polling, task_kind="video_generation", run_args=run_args)
+                    db.add(GenerationTaskLink(task_id=task_record.id, resource_type="video", relation_type="shot_video", relation_entity_id=sid))
+                    await mark_shot_generating(db, shot_id=sid)
+                    results.append({"shot_id": sid, "task_id": task_record.id, "status": "submitted"})
+                    succeeded += 1
+                except Exception as exc:
+                    results.append({"shot_id": sid, "error": str(exc)[:200]})
+                    failed += 1
+            await db.commit()
+            for r in results:
+                if "task_id" in r:
+                    try: enqueue_task_execution(r["task_id"])
+                    except Exception as e: logger.warning("enqueue failed: %s", e)
+            return {"total": len(shot_ids), "succeeded": succeeded, "failed": failed, "results": results}
