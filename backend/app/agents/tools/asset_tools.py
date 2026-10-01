@@ -40,20 +40,19 @@ _ENTITY_MAP: dict[str, tuple[type, str, type, str]] = {
 
 
 class GetChapterScriptInput(BaseModel):
-    chapter_id: str = Field(description="chapter id")
+    """No parameters needed — chapter_id comes from AgentContext."""
 
 
 class GetChapterScriptTool(Tool):
     name = "get_chapter_script"
-    description = "Get chapter script text (raw_text, fallback condensed_text)"
+    description = "Get chapter script text from the current chapter (chapter_id from context, no parameters needed)"
     input_model = GetChapterScriptInput
 
     async def execute(self, ctx: AgentContext, **kwargs) -> dict:
-        data = GetChapterScriptInput(**kwargs)
         async with async_session_maker() as db:
-            chapter = await db.get(Chapter, data.chapter_id)
+            chapter = await db.get(Chapter, ctx.chapter_id)
             if chapter is None:
-                return {"error": "chapter not found", "chapter_id": data.chapter_id}
+                return {"error": "chapter not found", "chapter_id": ctx.chapter_id}
             script_text = chapter.raw_text or chapter.condensed_text or ""
             return {
                 "chapter_id": chapter.id,
@@ -63,13 +62,12 @@ class GetChapterScriptTool(Tool):
 
 
 class ExtractAssetsInput(BaseModel):
-    project_id: str = Field(description="project id")
     script_text: str = Field(description="script text")
 
 
 class ExtractAssetsTool(Tool):
     name = "extract_assets"
-    description = "Extract project-level assets from script text and spawn the task"
+    description = "Extract project-level assets from script text (project_id from context)"
     input_model = ExtractAssetsInput
 
     async def execute(self, ctx: AgentContext, **kwargs) -> dict:
@@ -77,7 +75,7 @@ class ExtractAssetsTool(Tool):
         async with async_session_maker() as db:
             result = await create_asset_extract_task(
                 db,
-                project_id=data.project_id,
+                project_id=ctx.project_id,
                 script_text=data.script_text,
                 write_to_db=True,
             )
@@ -92,13 +90,12 @@ class ExtractAssetsTool(Tool):
 
 
 class QueryAssetsInput(BaseModel):
-    project_id: str = Field(description="project id")
     entity_type: str = Field(description="character / scene / prop / costume")
 
 
 class QueryAssetsTool(Tool):
     name = "query_assets"
-    description = "Query project assets (character / scene / prop / costume)"
+    description = "Query project assets (project_id from context)"
     input_model = QueryAssetsInput
 
     async def execute(self, ctx: AgentContext, **kwargs) -> dict:
@@ -110,7 +107,7 @@ class QueryAssetsTool(Tool):
         async with async_session_maker() as db:
             rows = (
                 await db.execute(
-                    select(model_cls).where(model_cls.project_id == data.project_id)
+                    select(model_cls).where(model_cls.project_id == ctx.project_id)
                 )
             ).scalars().all()
             items = [
@@ -191,16 +188,15 @@ class GenerateImageTool(Tool):
 
 
 class CheckAssetStatusInput(BaseModel):
-    project_id: str = Field(description="project id")
+    """No parameters needed — project_id comes from AgentContext."""
 
 
 class CheckAssetStatusTool(Tool):
     name = "check_asset_status"
-    description = "Check image generation status for all project assets (file_id null = pending)"
+    description = "Check image generation status for all project assets (project_id from context, no parameters needed)"
     input_model = CheckAssetStatusInput
 
     async def execute(self, ctx: AgentContext, **kwargs) -> dict:
-        data = CheckAssetStatusInput(**kwargs)
         details: list[dict] = []
         total = 0
         ready = 0
@@ -209,7 +205,7 @@ class CheckAssetStatusTool(Tool):
                 entities = (
                     await db.execute(
                         select(model_cls).where(
-                            model_cls.project_id == data.project_id
+                            model_cls.project_id == ctx.project_id
                         )
                     )
                 ).scalars().all()
@@ -236,7 +232,7 @@ class CheckAssetStatusTool(Tool):
                         }
                     )
         return {
-            "project_id": data.project_id,
+            "project_id": ctx.project_id,
             "total": total,
             "ready": ready,
             "pending": total - ready,

@@ -42,6 +42,17 @@ _ACTION_TO_AGENT: dict[str, str] = {
 
 _VALID_ACTIONS = set(_ACTION_TO_AGENT) | {"completed"}
 
+# 阶段顺序（用于跳过已完成阶段）
+_STAGE_ORDER = ["build_assets", "extract_shots", "bind_assets", "generate_frames", "generate_videos"]
+
+
+def _next_uncompleted_stage(completed: set[str]) -> str | None:
+    """返回第一个未完成的阶段，全部完成返回 None。"""
+    for stage in _STAGE_ORDER:
+        if stage not in completed:
+            return stage
+    return None
+
 
 class Orchestrator:
     """一键制作编排器：Director 决策循环 + 确定性兜底 + 阶段重试。"""
@@ -156,6 +167,7 @@ class Orchestrator:
         results: list[AgentResult] = []
         history: list[str] = []
         attempts_by_stage: dict[str, int] = {}
+        completed_stages: set[str] = set()
 
         for _ in range(self.MAX_TOTAL_STAGES):
             action = await self._ask_director(goal, ctx, history)
@@ -168,6 +180,15 @@ class Orchestrator:
                 if on_progress:
                     on_progress({"stage": "completed", "status": "completed"})
                 break
+
+            # 跳过已完成的阶段，自动推进到下一个未完成阶段
+            if action in completed_stages:
+                next_stage = _next_uncompleted_stage(completed_stages)
+                if next_stage is None:
+                    if on_progress:
+                        on_progress({"stage": "completed", "status": "completed"})
+                    break
+                action = next_stage
 
             attempts_by_stage[action] = attempts_by_stage.get(action, 0) + 1
             if attempts_by_stage[action] > self.MAX_STAGE_ATTEMPTS:
@@ -210,6 +231,10 @@ class Orchestrator:
                         "counts": _extract_counts(stage_tools),
                     }
                 )
+            # 阶段完成后重置该阶段的尝试计数
+            attempts_by_stage[action] = 0
+            # 标记该阶段已完成，Director 不会再选已完成的阶段
+            completed_stages.add(action)
 
         else:
             logger.warning("Orchestrator hit MAX_TOTAL_STAGES (%d)", self.MAX_TOTAL_STAGES)

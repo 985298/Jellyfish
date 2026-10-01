@@ -139,7 +139,7 @@ class SpecialistAgent(AgentBase[AgentResult]):
         """调用 create_agent 产生的 Runnable，传入用户消息。"""
         self._ctx = ctx  # 更新上下文
         agent = self.create_agent(structured_output=AgentResult)
-        result = await agent.ainvoke({"user_input": user_input})
+        result = await agent.ainvoke({"user_input": user_input}, config={"recursion_limit": 80})
 
         # 解析结果
         if isinstance(result, dict) and "messages" in result:

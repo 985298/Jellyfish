@@ -31,13 +31,12 @@ if TYPE_CHECKING:
 
 
 class ExtractShotsInput(BaseModel):
-    chapter_id: str = Field(description="chapter id")
     script_text: str = Field(description="script text to divide into shots")
 
 
 class ExtractShotsTool(Tool):
     name = "extract_shots"
-    description = "Divide chapter script into shots and spawn the divide task"
+    description = "Divide chapter script into shots (chapter_id from context)"
     input_model = ExtractShotsInput
 
     async def execute(self, ctx: AgentContext, **kwargs) -> dict:
@@ -45,7 +44,7 @@ class ExtractShotsTool(Tool):
         async with async_session_maker() as db:
             result = await create_divide_task(
                 db,
-                chapter_id=data.chapter_id,
+                chapter_id=ctx.chapter_id,
                 script_text=data.script_text,
                 write_to_db=True,
             )
@@ -55,28 +54,27 @@ class ExtractShotsTool(Tool):
             "task_id": result.task_id,
             "status": str(result.status),
             "reused": result.reused,
-            "chapter_id": data.chapter_id,
+            "chapter_id": ctx.chapter_id,
         }
 
 
 class BindAssetsInput(BaseModel):
-    chapter_id: str = Field(description="chapter id (shots and assets are queried internally)")
+    """No parameters needed — chapter_id and project_id come from AgentContext."""
 
 
 class BindAssetsTool(Tool):
     name = "bind_assets"
-    description = "Bind existing project assets to shots for a chapter (auto-queries shots + assets)"
+    description = "Bind existing project assets to shots (chapter_id and project_id from context, no parameters needed)"
     input_model = BindAssetsInput
 
     async def execute(self, ctx: AgentContext, **kwargs) -> dict:
-        data = BindAssetsInput(**kwargs)
         project_id = ctx.project_id
         async with async_session_maker() as db:
             # --- query shots for the chapter (with detail eagerly loaded) ---
             shots = (
                 await db.execute(
                     select(Shot)
-                    .where(Shot.chapter_id == data.chapter_id)
+                    .where(Shot.chapter_id == ctx.chapter_id)
                     .options(selectinload(Shot.detail))
                     .order_by(Shot.index)
                 )
@@ -137,7 +135,7 @@ class BindAssetsTool(Tool):
             # --- create bind task ---
             result = await create_asset_bind_task(
                 db,
-                chapter_id=data.chapter_id,
+                chapter_id=ctx.chapter_id,
                 script_division_json=json.dumps(division, ensure_ascii=False),
                 asset_list_json=json.dumps(asset_list, ensure_ascii=False),
             )
@@ -147,7 +145,7 @@ class BindAssetsTool(Tool):
             "task_id": result.task_id,
             "status": str(result.status),
             "reused": result.reused,
-            "chapter_id": data.chapter_id,
+            "chapter_id": ctx.chapter_id,
             "shot_count": len(division),
             "asset_counts": {
                 "characters": len(characters),
@@ -159,21 +157,20 @@ class BindAssetsTool(Tool):
 
 
 class QueryShotsInput(BaseModel):
-    chapter_id: str = Field(description="chapter id")
+    """No parameters needed — chapter_id comes from AgentContext."""
 
 
 class QueryShotsTool(Tool):
     name = "query_shots"
-    description = "Query shots for a chapter (with detail)"
+    description = "Query shots for the current chapter (chapter_id from context, no parameters needed)"
     input_model = QueryShotsInput
 
     async def execute(self, ctx: AgentContext, **kwargs) -> dict:
-        data = QueryShotsInput(**kwargs)
         async with async_session_maker() as db:
             shots = (
                 await db.execute(
                     select(Shot)
-                    .where(Shot.chapter_id == data.chapter_id)
+                    .where(Shot.chapter_id == ctx.chapter_id)
                     .options(selectinload(Shot.detail))
                     .order_by(Shot.index)
                 )
@@ -197,8 +194,8 @@ class QueryShotsTool(Tool):
                     item["scene_id"] = d.scene_id
                     item["duration"] = d.duration
                 items.append(item)
-            return {
-                "chapter_id": data.chapter_id,
-                "count": len(items),
-                "items": items,
-            }
+        return {
+            "chapter_id": ctx.chapter_id,
+            "count": len(items),
+            "items": items,
+        }
