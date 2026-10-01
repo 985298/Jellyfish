@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
@@ -24,6 +24,17 @@ class GenerateFrameInput(BaseModel):
     shot_id: str = Field(description="shot id")
     frame_type: str = Field(default="first", description="first / last / key")
     prompt: str | None = Field(default=None, description="custom prompt (auto-built from shot detail if empty)")
+
+    @field_validator("frame_type", mode="before")
+    @classmethod
+    def normalize_frame_type(cls, v):
+        """Map 'first_frame' -> 'first', 'last_frame' -> 'last', etc."""
+        if isinstance(v, str):
+            v = v.lower().strip()
+            if "first" in v: return "first"
+            if "last" in v: return "last"
+            if "key" in v: return "key"
+        return v
 
 
 class GenerateFrameTool(Tool):

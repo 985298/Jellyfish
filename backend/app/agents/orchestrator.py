@@ -223,7 +223,11 @@ class Orchestrator:
                             "tool_calls": stage_tools,
                         }
                     )
-                break
+                # Mark as completed (failed) and continue to next stage
+                # instead of stopping the entire orchestration
+                completed_stages.add(action)
+                attempts_by_stage[action] = 0
+                continue
 
             history.append(action)
             if on_progress:
