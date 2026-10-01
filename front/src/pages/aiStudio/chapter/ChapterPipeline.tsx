@@ -6,6 +6,7 @@ import { StudioChaptersService } from '../../../services/generated'
 import { useParams, Link } from 'react-router-dom'
 import { StageCard } from './ChapterPipeline/StageCard'
 import { usePipelineState, useTaskPolling, fetchPipelineStatus } from './ChapterPipeline/usePipelineState'
+import { useAgentOrchestration } from './ChapterPipeline/useAgentOrchestration'
 import { buildStageRunners, STAGE_ORDER } from './ChapterPipeline/pipelineStages'
 import type { Stage, StageKey } from './ChapterPipeline/types'
 
@@ -77,8 +78,14 @@ export default function ChapterPipeline() {
   const taskIdRef = useRef<Partial<Record<StageKey, string | null>>>({})
   const chainAbortRef = useRef(false)
 
-  const { stages, updateStage, resetStageForRun, hydrateFromPipelineStatus } = usePipelineState(INITIAL_STAGES)
+  const { stages, updateStage, resetStageForRun, resetAllStages, hydrateFromPipelineStatus } = usePipelineState(INITIAL_STAGES)
   const { poll } = useTaskPolling()
+  const { orchestrate, isOrchestrating } = useAgentOrchestration({
+    updateStage,
+    resetAllStages,
+    onComplete: () => message.success('一键制作完成'),
+    onError: (msg: string) => message.error(msg),
+  })
 
   const loadStatus = useCallback(async () => {
     if (!chapterId) return
@@ -135,18 +142,8 @@ export default function ChapterPipeline() {
       message.error('缺少项目/章节/剧本')
       return
     }
-    chainAbortRef.current = false
-    let lastOk = true
-    for (const key of STAGE_ORDER) {
-      if (chainAbortRef.current) break
-      setRunningStage(key)
-      const res = await runnersRef.current[key]()
-      lastOk = res.ok
-      if (!lastOk) break
-    }
-    setRunningStage(null)
-    if (lastOk) message.success('一键制作完成')
-  }, [projectId, chapterId, scriptText])
+    await orchestrate({ projectId, chapterId, goal: '制作短剧' })
+  }, [projectId, chapterId, scriptText, orchestrate])
 
   // canRun: a stage is runnable if its predecessor is done (or it's the first).
   const canRun = useCallback((key: StageKey) => {
@@ -158,7 +155,7 @@ export default function ChapterPipeline() {
   }, [stages])
 
   const allDone = stages.every((s) => s.status === 'done')
-  const busy = loading || runningStage !== null
+  const busy = loading || runningStage !== null || isOrchestrating
 
   return (
     <div className="p-6 max-w-4xl mx-auto">

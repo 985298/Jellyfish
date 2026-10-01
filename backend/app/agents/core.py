@@ -117,6 +117,9 @@ class SpecialistAgent(AgentBase[AgentResult]):
 
         async def _arun(**kwargs: Any) -> str:
             result = await tool.execute(ctx=ctx, **kwargs)
+            # 把真实返回值也记进 ctx.tool_results：Orchestrator 需要它来统计
+            # "本阶段新增 N 个资产"，SSE 也据此回填 tool_calls 的结果。
+            ctx.tool_results.append({"tool": tool.name, "args": kwargs, "result": result})
             return json.dumps(result, ensure_ascii=False, default=str)
 
         def _run(**kwargs: Any) -> str:

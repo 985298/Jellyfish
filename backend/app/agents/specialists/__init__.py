@@ -51,6 +51,7 @@ _AGENT_TOOL_NAMES: dict[str, list[str]] = {
         "generate_frame",
         "generate_video",
         "check_task_status",
+        "retry_task",
     ],
 }
 
@@ -73,7 +74,7 @@ def _build_tool_registry() -> dict[str, Tool]:
         ExtractShotsTool,
         QueryShotsTool,
     )
-    from app.agents.tools.status_tools import CheckTaskStatusTool
+    from app.agents.tools.status_tools import CheckTaskStatusTool, RetryTaskTool
 
     return {
         "get_chapter_script": GetChapterScriptTool(),
@@ -87,6 +88,7 @@ def _build_tool_registry() -> dict[str, Tool]:
         "generate_frame": GenerateFrameTool(),
         "generate_video": GenerateVideoTool(),
         "check_task_status": CheckTaskStatusTool(),
+        "retry_task": RetryTaskTool(),
     }
 
 

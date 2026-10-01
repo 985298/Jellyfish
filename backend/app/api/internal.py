@@ -19,6 +19,7 @@ from app.models.studio import Scene, Prop, Costume
 from app.schemas.studio.shots import ShotRead, ShotLinkedAssetItem
 from app.services.studio.shots import list_paginated as list_shots_paginated
 from app.services.studio.shot_assets import list_shot_linked_assets_paginated
+from app.services.studio.project_status import get_project_asset_gaps, get_project_status_summary
 from pydantic import BaseModel, Field
 from typing import Optional
 
@@ -719,3 +720,43 @@ async def list_shot_linked_assets_internal(
         page=page,
         page_size=page_size,
     )
+
+
+# ---------- P0 智能特性：项目状态汇总 / 资产缺口（Gateway 转发） ----------
+
+
+@router.get("/v1/projects/{project_id}/status-summary", response_model=ApiResponse[dict])
+async def get_project_status_summary_internal(
+    project_id: str,
+    project_ids: str | None = Query(
+        None,
+        description="逗号分隔的项目 ID 白名单；非空时校验 project_id 在其中，否则返回 404（供 Gateway 做租户隔离）",
+    ),
+    db: AsyncSession = Depends(get_db),
+) -> ApiResponse[dict]:
+    """Gateway 调用：项目状态汇总（资产/镜头/任务统计 + 推荐下一步）。
+
+    - project_ids 非空时做租户隔离校验：project_id 不在白名单内返回 404。
+    - 与公开的 asset-gaps 端点共用 ``app.services.studio.project_status`` 的聚合口径，
+      保证 SaaS 控制台和 DirectorAgent 看到的数字一致。
+    """
+    pid_set = _parse_project_ids(project_ids)
+    if pid_set is not None and project_id not in pid_set:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Project not found for this tenant",
+        )
+    return success_response(data=await get_project_status_summary(db, project_id))
+
+
+@router.get("/v1/projects/{project_id}/asset-gaps", response_model=ApiResponse[dict])
+async def get_project_asset_gaps_internal(
+    project_id: str,
+    db: AsyncSession = Depends(get_db),
+) -> ApiResponse[dict]:
+    """Gateway 调用：资产缺口清单（缺图资产 + 缺细节/缺首帧/缺视频的镜头）。
+
+    缺口数据本身不含敏感信息，且只在已通过租户校验的项目范围内计算，
+    因此不再重复接收 project_ids 白名单。
+    """
+    return success_response(data=await get_project_asset_gaps(db, project_id))

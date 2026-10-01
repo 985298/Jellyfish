@@ -186,6 +186,7 @@ class QueryShotsTool(Tool):
                     "title": shot.title,
                     "status": str(shot.status),
                     "script_excerpt": shot.script_excerpt,
+                    "generated_video_file_id": shot.generated_video_file_id,
                 }
                 if shot.detail is not None:
                     d = shot.detail
