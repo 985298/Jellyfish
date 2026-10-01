@@ -35,9 +35,9 @@ def _append_division_rows(
         db_add(
             ShotDetail(
                 id=shot_id,
-                camera_shot=CameraShotType.ms,
-                angle=CameraAngle.eye_level,
-                movement=CameraMovement.static,
+                camera_shot=getattr(shot_division, 'camera_shot', None) and CameraShotType(getattr(shot_division, 'camera_shot', '').lower()) or CameraShotType.ms,
+                angle=getattr(shot_division, 'angle', None) and CameraAngle(getattr(shot_division, 'angle', '').lower()) or CameraAngle.eye_level,
+                movement=getattr(shot_division, 'movement', None) and CameraMovement(getattr(shot_division, 'movement', '').lower()) or CameraMovement.static,
                 follow_atmosphere=True,
                 vfx_type=VFXType.none,
                 duration=getattr(shot_division, 'duration', 6) or 6,

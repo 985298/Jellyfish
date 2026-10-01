@@ -232,12 +232,31 @@ class GenerateVideosBatchTool(Tool):
             shot_ids = data.shot_ids
             if not shot_ids and ctx.chapter_id:
                 shot_ids = [str(r) for r in (await db.execute(select(Shot.id).where(Shot.chapter_id == ctx.chapter_id).order_by(Shot.index))).scalars().all()]
+            # Pre-fetch all shots' first-frame file_ids for continuity
+            frame_map = {}
+            if shot_ids:
+                for row in (await db.execute(select(ShotFrameImage.shot_detail_id, ShotFrameImage.file_id).where(
+                    ShotFrameImage.shot_detail_id.in_(shot_ids),
+                    ShotFrameImage.frame_type == "first",
+                    ShotFrameImage.file_id.isnot(None),
+                ))).all():
+                    frame_map[str(row[0])] = str(row[1])
             results = []
             succeeded = 0
             failed = 0
-            for sid in shot_ids:
+            for i, sid in enumerate(shot_ids):
                 try:
-                    run_args = await build_vg_run_args(db, shot_id=sid, reference_mode=data.reference_mode, prompt=None, images=[], ratio=ratio)
+                    # Continuity: use first_last mode with next shot's first frame as last frame
+                    cur_frame = frame_map.get(sid)
+                    next_sid = shot_ids[i + 1] if i + 1 < len(shot_ids) else None
+                    next_frame = frame_map.get(next_sid) if next_sid else None
+                    if cur_frame and next_frame:
+                        images_list = [cur_frame, next_frame]
+                        ref_mode = "first_last"
+                    else:
+                        images_list = []
+                        ref_mode = data.reference_mode
+                    run_args = await build_vg_run_args(db, shot_id=sid, reference_mode=ref_mode, prompt=None, images=images_list, ratio=ratio)
                     store = SqlAlchemyTaskStore(db)
                     tm = TaskManager(store=store, strategies={})
                     task_record = await tm.create(task=_CreateOnlyTask(), mode=DeliveryMode.async_polling, task_kind="video_generation", run_args=run_args)
