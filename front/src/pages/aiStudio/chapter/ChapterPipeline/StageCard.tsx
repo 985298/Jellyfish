@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { Button, Progress, Tag } from 'antd'
+import { Button, Progress, Tag, Tooltip } from 'antd'
 import {
   CheckCircleOutlined,
   ClockCircleOutlined,
@@ -79,10 +79,27 @@ export function StageCard({ stage, index, canRun, busy, externalLink, onRun }: S
                 size="small"
                 status={isFailed ? 'exception' : isDone ? 'success' : 'active'}
                 className="mt-2"
-                style={{ maxWidth: 320 }}
-              />
+               style={{ maxWidth: 320 }}
+             />
+           )}
+            {stage.agentInfo && (stage.agentInfo.output || stage.agentInfo.toolCalls.length > 0) && (
+              <div className="mt-1 p-2 bg-gray-50 rounded text-xs space-y-1">
+                {stage.agentInfo.toolCalls.length > 0 && (
+                  <div className="flex items-center gap-1 flex-wrap">
+                    <span className="text-gray-400">工具:</span>
+                    {stage.agentInfo.toolCalls.map((tc, i) => (
+                      <Tooltip key={i} title={tc.args ? JSON.stringify(tc.args) : undefined}>
+                        <Tag className="m-0" style={{ fontSize: 11 }}>{tc.tool}</Tag>
+                      </Tooltip>
+                    ))}
+                  </div>
+                )}
+                {stage.agentInfo.output && (
+                  <div className="text-gray-500">{stage.agentInfo.output}</div>
+                )}
+              </div>
             )}
-          </div>
+         </div>
         </div>
       </div>
       <div className="flex items-center gap-2 ml-2">

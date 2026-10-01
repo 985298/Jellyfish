@@ -38,9 +38,27 @@ export type Stage = {
   /** 0-100 进度百分比 */
   progress: number
   output?: StageOutput | null
-  actionLabel?: string
-  retryLabel?: string
-  error?: string | null
+ actionLabel?: string
+ retryLabel?: string
+ error?: string | null
+  agentInfo?: AgentStageInfo | null
 }
 
 export type StagePatch = Partial<Omit<Stage, 'key' | 'title' | 'desc'>>
+
+/** A single tool invocation recorded by the Agent during a stage. */
+export type AgentToolCall = {
+  tool: string
+  args?: Record<string, unknown>
+  result?: string
+}
+
+/** Agent thinking metadata attached to a stage card. */
+export type AgentStageInfo = {
+  /** Human-readable output from the agent (e.g. "提取了5个角色"). */
+  output?: string
+  /** Tools called during this stage. */
+  toolCalls: AgentToolCall[]
+  /** Error message if the stage failed. */
+  error?: string | null
+}

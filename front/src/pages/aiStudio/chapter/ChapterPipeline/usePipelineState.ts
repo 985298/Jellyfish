@@ -104,13 +104,24 @@ export function usePipelineState(initial: Stage[]) {
 
   const resetStageForRun = useCallback((key: StageKey) => {
     setStages((prev) => prev.map((s) => (
-      s.key === key
-        ? { ...s, status: 'running', progress: 2, output: null, error: null }
-        : s
-    )))
+     s.key === key
+        ? { ...s, status: 'running', progress: 2, output: null, error: null, agentInfo: null }
+       : s
+   )))
+ }, [])
+
+  const resetAllStages = useCallback(() => {
+    setStages((prev) => prev.map((s) => ({
+      ...s,
+      status: 'not_started' as const,
+      progress: 0,
+      output: null,
+      error: null,
+      agentInfo: null,
+    })))
   }, [])
 
-  const hydrateFromPipelineStatus = useCallback((data: PipelineStatusData) => {
+ const hydrateFromPipelineStatus = useCallback((data: PipelineStatusData) => {
     setStages((prev) => prev.map((s) => {
       if (s.key === 'asset_extract') {
         const status = (data.stage_asset_extract as Stage['status']) || s.status
@@ -132,8 +143,9 @@ export function usePipelineState(initial: Stage[]) {
     stages,
     setStages,
     updateStage,
-    resetStageForRun,
-    hydrateFromPipelineStatus,
+   resetStageForRun,
+    resetAllStages,
+   hydrateFromPipelineStatus,
   }
 }
 

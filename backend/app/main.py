@@ -10,6 +10,7 @@ from pydantic import ValidationError
 
 from app.api.v1 import router as api_v1_router
 from app.api import internal
+from app.agents.api_routes import router as agents_router
 from app.bootstrap import bootstrap_all_registries
 from app.config import settings
 from app.core.storage import init_storage
@@ -105,6 +106,7 @@ app.add_middleware(
 
 app.include_router(api_v1_router, prefix=settings.api_v1_prefix)
 app.include_router(internal.router, prefix='/internal')
+app.include_router(agents_router)
 # 影视技能路由同时挂到主应用，保证 /api/v1/film 一定可访问
 
 
