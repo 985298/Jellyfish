@@ -62,7 +62,7 @@ def _record_executor_dispatch(task_id: str, *, executor_type: str, executor_task
 def enqueue_task_execution(task_id: str) -> AsyncResult:
     # 检测 Celery worker 是否在线；不在线则回退到进程内有界线程池执行
     try:
-        inspect = celery_app.control.inspect(timeout=1)
+        inspect = celery_app.control.inspect(timeout=5)
         ping_result = inspect.ping()
         if not ping_result:
             raise RuntimeError("No Celery worker responding")
