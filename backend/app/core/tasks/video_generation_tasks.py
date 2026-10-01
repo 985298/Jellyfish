@@ -6,8 +6,11 @@ HTTP 细节在 `app.core.integrations`；本模块保留轮询节奏与 BaseTask
 from __future__ import annotations
 
 import asyncio
+import logging
 from abc import ABC, abstractmethod
 from typing import Any, AsyncIterator
+
+import httpx
 
 from app.core.integrations.openai.video import OpenAIVideoApiAdapter
 from app.core.integrations.volcengine.video import VolcengineVideoApiAdapter
@@ -15,6 +18,8 @@ from app.core.contracts.provider import ProviderConfig
 from app.core.tasks.registry import resolve_task_adapter
 from app.core.contracts.video_generation import VideoGenerationInput, VideoGenerationResult
 from app.core.task_manager.types import BaseTask
+
+logger = logging.getLogger(__name__)
 
 __all__ = [
     "VideoGenerationInput",
@@ -25,6 +30,10 @@ __all__ = [
     "VideoGenerationTask",
 ]
 
+# 轮询时可重试的 HTTP 状态：429 限流 + 网关/服务端错误。
+# 其余 4xx（401 鉴权失败、404 任务不存在等）重试无意义，直接抛出。
+_RETRYABLE_POLL_STATUSES = frozenset({429, 500, 502, 503, 504})
+
 
 class AbstractVideoGenerationTask(BaseTask, ABC):
     """视频生成任务基类：公共状态与 run/status/is_done/get_result。"""
@@ -34,8 +43,8 @@ class AbstractVideoGenerationTask(BaseTask, ABC):
         *,
         provider_config: ProviderConfig,
         input_: VideoGenerationInput,
-        poll_interval_s: float = 2.0,
-        timeout_s: float = 120.0,
+        poll_interval_s: float = 5.0,
+        timeout_s: float = 900.0,
     ) -> None:
         self._cfg = provider_config
         self._input = input_
@@ -58,8 +67,43 @@ class AbstractVideoGenerationTask(BaseTask, ABC):
         """
         return asyncio.get_event_loop().time() + max(self._timeout_s, 30.0)
 
-    async def _sleep_poll(self) -> None:
-        await asyncio.sleep(self._poll_interval_s)
+    # 轮询期间网络抖动/网关错误的重试预算：查询天然幂等，可以放心重试。
+    # 注意次数上限而非无限重试——软截止时间才是主闸门，这里只是别让单次抖动
+    # 把一个已经提交成功的供应商任务判死刑。
+    _POLL_MAX_TRANSIENT_RETRIES = 5
+    _POLL_RETRY_BASE_DELAY = 2.0
+
+    async def _poll_query(self, query: Any) -> Any:
+        """执行一次轮询查询，对瞬时故障（传输错误/超时/429/5xx）退避重试。
+
+        query 是一个无参协程工厂（``lambda: adapter.get_video(...)``），
+        因为协程只能 await 一次，重试时需要重新构造。
+        """
+        last_exc: Exception | None = None
+        for attempt in range(self._POLL_MAX_TRANSIENT_RETRIES + 1):
+            try:
+                return await query()
+            except (httpx.TransportError, httpx.TimeoutException) as exc:
+                last_exc = exc
+            except httpx.HTTPStatusError as exc:
+                # 4xx（除 429）是请求本身的问题，重试没有意义；5xx/429 才值得再试。
+                if exc.response.status_code not in _RETRYABLE_POLL_STATUSES:
+                    raise
+                last_exc = exc
+            if attempt >= self._POLL_MAX_TRANSIENT_RETRIES:
+                break
+            delay = self._POLL_RETRY_BASE_DELAY * (2**attempt)
+            logger.warning(
+                "poll transient failure: task=%s attempt=%d/%d retry_in=%.1fs err=%s",
+                type(self).__name__,
+                attempt + 1,
+                self._POLL_MAX_TRANSIENT_RETRIES,
+                delay,
+                last_exc,
+            )
+            await asyncio.sleep(delay)
+        assert last_exc is not None
+        raise last_exc
 
     @abstractmethod
     async def _create_task(self) -> None:
@@ -107,8 +151,8 @@ class OpenAIVideoGenerationTask(AbstractVideoGenerationTask):
         adapter: OpenAIVideoApiAdapter | None = None,
         provider_config: ProviderConfig,
         input_: VideoGenerationInput,
-        poll_interval_s: float = 2.0,
-        timeout_s: float = 120.0,
+        poll_interval_s: float = 5.0,
+        timeout_s: float = 900.0,
     ) -> None:
         super().__init__(
             provider_config=provider_config,
@@ -134,10 +178,12 @@ class OpenAIVideoGenerationTask(AbstractVideoGenerationTask):
         status_val = ""
         deadline = self._poll_deadline()
         while True:
-            meta = await self._adapter.get_video(
-                cfg=self._cfg,
-                video_id=video_id,
-                timeout_s=self._timeout_s,
+            meta = await self._poll_query(
+                lambda: self._adapter.get_video(
+                    cfg=self._cfg,
+                    video_id=video_id,
+                    timeout_s=self._timeout_s,
+                )
             )
             status_val = str(meta.get("status") or "")
             if status_val in ("completed", "failed"):
@@ -169,8 +215,8 @@ class VolcengineVideoGenerationTask(AbstractVideoGenerationTask):
         adapter: VolcengineVideoApiAdapter | None = None,
         provider_config: ProviderConfig,
         input_: VideoGenerationInput,
-        poll_interval_s: float = 2.0,
-        timeout_s: float = 120.0,
+        poll_interval_s: float = 5.0,
+        timeout_s: float = 900.0,
     ) -> None:
         super().__init__(
             provider_config=provider_config,
@@ -197,10 +243,12 @@ class VolcengineVideoGenerationTask(AbstractVideoGenerationTask):
         video_url: str | None = None
         deadline = self._poll_deadline()
         while True:
-            meta = await self._adapter.get_contents_task(
-                cfg=self._cfg,
-                task_id=task_id,
-                timeout_s=self._timeout_s,
+            meta = await self._poll_query(
+                lambda: self._adapter.get_contents_task(
+                    cfg=self._cfg,
+                    task_id=task_id,
+                    timeout_s=self._timeout_s,
+                )
             )
             status_val = str(meta.get("status") or "")
             content = meta.get("content") or {}
@@ -239,8 +287,8 @@ class VideoGenerationTask(BaseTask):
         *,
         provider_config: ProviderConfig,
         input_: VideoGenerationInput,
-        poll_interval_s: float = 2.0,
-        timeout_s: float = 120.0,
+        poll_interval_s: float = 5.0,
+        timeout_s: float = 900.0,
     ) -> None:
         from app.bootstrap import bootstrap_all_registries
 
@@ -258,8 +306,8 @@ class VideoGenerationTask(BaseTask):
         *,
         provider_config: ProviderConfig,
         input_: VideoGenerationInput,
-        poll_interval_s: float = 2.0,
-        timeout_s: float = 120.0,
+        poll_interval_s: float = 5.0,
+        timeout_s: float = 900.0,
     ) -> AbstractVideoGenerationTask:
         return OpenAIVideoGenerationTask(
             provider_config=provider_config,
@@ -273,8 +321,8 @@ class VideoGenerationTask(BaseTask):
         *,
         provider_config: ProviderConfig,
         input_: VideoGenerationInput,
-        poll_interval_s: float = 2.0,
-        timeout_s: float = 120.0,
+        poll_interval_s: float = 5.0,
+        timeout_s: float = 900.0,
     ) -> AbstractVideoGenerationTask:
         return VolcengineVideoGenerationTask(
             provider_config=provider_config,

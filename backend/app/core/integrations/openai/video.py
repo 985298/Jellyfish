@@ -12,9 +12,10 @@ from app.core.contracts.video_generation import VideoGenerationInput
 
 logger = logging.getLogger(__name__)
 
-# 网络抖动 / 网关 5xx 时重试，避免单次失败直接把整个视频任务判死刑。
+# 网络抖动 / 网关 5xx / 429 限流时重试，避免单次失败直接把整个视频任务判死刑。
 # 仅重试幂等的创建请求；查询天然幂等。
-_CREATE_RETRY_STATUSES = {502, 503, 504}
+# 429 限流：解析 Retry-After 头（秒），若无则使用 2^n 退避。
+_CREATE_RETRY_STATUSES = {429, 502, 503, 504}
 _CREATE_MAX_RETRIES = 3
 _CREATE_RETRY_BASE_DELAY = 1.5
 
@@ -68,12 +69,25 @@ class OpenAIVideoApiAdapter:
                     attempt + 1,
                     exc.response.status_code,
                 )
+                # 429 时优先用 Retry-After 头指定的秒数，退避更精准
+                if exc.response.status_code == 429:
+                    retry_after = exc.response.headers.get("Retry-After")
+                    if retry_after:
+                        try:
+                            _delay = float(retry_after)
+                        except ValueError:
+                            _delay = _CREATE_RETRY_BASE_DELAY * (2 ** attempt)
+                    else:
+                        _delay = _CREATE_RETRY_BASE_DELAY * (2 ** attempt)
+                else:
+                    _delay = _CREATE_RETRY_BASE_DELAY * (2 ** attempt)
             except (httpx.TransportError, httpx.TimeoutException) as exc:
                 last_exc = exc
                 logger.warning("OpenAI /videos transport error attempt=%d: %s", attempt + 1, exc)
+                _delay = _CREATE_RETRY_BASE_DELAY * (2 ** attempt)
 
             if attempt < _CREATE_MAX_RETRIES - 1:
-                await asyncio.sleep(_CREATE_RETRY_BASE_DELAY * (2 ** attempt))
+                await asyncio.sleep(_delay)
 
         raise RuntimeError(f"OpenAI /videos failed after {_CREATE_MAX_RETRIES} attempts: {last_exc}") from last_exc
 
