@@ -113,6 +113,19 @@ async def download_file_api(
 
 
 @router.get(
+    "/local/{key:path}",
+    summary="下载本地磁盘文件（开发降级）",
+)
+async def download_local_file(key: str):
+    from fastapi.responses import FileResponse
+    from app.core.storage import _local_path
+    path = _local_path(key)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail=f"文件不存在: {key}")
+    return FileResponse(path)
+
+
+@router.get(
     "/{file_id}/storage-info",
     response_model=ApiResponse[dict],
     summary="获取对象存储详情（head_object）",

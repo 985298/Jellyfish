@@ -1,23 +1,29 @@
-"""统一的对象存储封装（目前以 S3 兼容为主）。
+"""统一的对象存储封装（S3 兼容优先，本地磁盘降级）。
 
 设计目标：
 - 提供上传 / 下载 / 列表 / 详情 等基础能力；
 - 尽量不绑定具体云厂商，只依赖 S3 兼容协议；
+- S3 不可用时自动降级到本地磁盘目录（开发环境用）；
 - 在 FastAPI 异步环境下，避免阻塞事件循环：通过 anyio 在线程池中调用 boto3。
 """
 
 from __future__ import annotations
 
+import logging
+import mimetypes
+import shutil
+from pathlib import Path
 from dataclasses import dataclass
 from typing import Any, BinaryIO
 
 from anyio import to_thread
 import boto3
 from botocore.client import Config as BotoConfig
-from botocore.exceptions import ClientError
+from botocore.exceptions import ClientError, EndpointConnectionError, ConnectTimeoutError, ReadTimeoutError
 
 from app.config import settings
 
+logger = logging.getLogger(__name__)
 
 @dataclass
 class StoredFileInfo:
@@ -74,11 +80,44 @@ def _normalize_key(key: str) -> str:
     return key
 
 
+# ---- Local fallback ----
+
+_s3_available: bool | None = None  # cache: None=unknown, True/False=checked
+
+
+def _local_root() -> Path:
+    return Path(settings.local_storage_root).resolve()
+
+
+def _local_path(key: str) -> Path:
+    return _local_root() / _normalize_key(key)
+
+
+def _check_s3_available() -> bool:
+    global _s3_available
+    if _s3_available is not None:
+        return _s3_available
+    if not settings.s3_bucket_name:
+        _s3_available = False
+        return False
+    try:
+        client = _build_s3_client()
+        client.head_bucket(Bucket=settings.s3_bucket_name)
+        _s3_available = True
+    except Exception:
+        logger.warning("S3 不可用，降级到本地磁盘存储：%s", settings.local_storage_root)
+        _s3_available = False
+    return _s3_available
+
+
 def _build_public_url(key: str) -> str:
     key = _normalize_key(key)
     if settings.s3_public_base_url:
         base = settings.s3_public_base_url.rstrip("/")
         return f"{base}/{key}"
+    if not _check_s3_available():
+        # 本地存储直接返回 API 下载路径
+        return f"/api/v1/studio/files/local/{key}"
     # fallback：使用标准 S3 URL 形式；具体可根据实际厂商调整
     if not settings.s3_bucket_name:
         raise RuntimeError("S3 未配置：缺少 s3_bucket_name")
@@ -97,10 +136,18 @@ def init_storage() -> None:
     - 若无权限/配置错误会抛出异常，便于在部署时尽早失败；
     - 对于部分 S3 兼容服务（MinIO 等），CreateBucket 的参数可能不同，这里尽量兼容常见情形。
     """
-    client = _build_s3_client()
     bucket = settings.s3_bucket_name
     if not bucket:
-        raise RuntimeError("S3 未配置：缺少 s3_bucket_name")
+        logger.warning("S3 未配置，使用本地磁盘存储：%s", settings.local_storage_root)
+        _local_root().mkdir(parents=True, exist_ok=True)
+        return
+
+    if not _check_s3_available():
+        logger.warning("S3 不可达，使用本地磁盘存储：%s", settings.local_storage_root)
+        _local_root().mkdir(parents=True, exist_ok=True)
+        return
+
+    client = _build_s3_client()
 
     try:
         client.head_bucket(Bucket=bucket)
@@ -146,12 +193,24 @@ async def upload_file(
     - extra_args：透传给 boto3 的 ExtraArgs，如 {"ACL": "public-read"}。
     """
 
-    client = _build_s3_client()
     bucket = settings.s3_bucket_name
-    if bucket is None:
-        raise RuntimeError("S3 未配置：缺少 s3_bucket_name")
-
     s3_key = _normalize_key(key)
+
+    if not _check_s3_available() or bucket is None:
+        # 本地磁盘降级
+        path = _local_path(key)
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        def _local_upload():
+            if isinstance(data, (bytes, bytearray)):
+                path.write_bytes(bytes(data))
+            else:
+                shutil.copyfileobj(data, path.open("wb"))
+
+        await to_thread.run_sync(_local_upload)
+        return StoredFileInfo(key=s3_key, url=_build_public_url(key))
+
+    client = _build_s3_client()
     extra = extra_args.copy() if extra_args else {}
     if content_type and "ContentType" not in extra:
         extra["ContentType"] = content_type
@@ -186,6 +245,12 @@ async def upload_file(
 
 async def download_file(*, key: str) -> bytes:
     """下载文件内容（整个对象读入内存）。"""
+    if not _check_s3_available() or settings.s3_bucket_name is None:
+        path = _local_path(key)
+        if not path.exists():
+            raise FileNotFoundError(f"文件不存在: {key}")
+        return await to_thread.run_sync(path.read_bytes)
+
     client = _build_s3_client()
     bucket = settings.s3_bucket_name
     if bucket is None:
@@ -207,6 +272,9 @@ def presigned_url(*, key: str, expires: int = 3600) -> str:
     RustFS / MinIO 默认不公开对象；`_build_public_url` 拼出的直链在私有时无法访问。
     渲染链路 / Gateway 下载应改用预签名 URL，凭 S3 凭证签发，过期失效。
     """
+    if not _check_s3_available() or settings.s3_bucket_name is None:
+        return _build_public_url(key)
+
     client = _build_s3_client()
     bucket = settings.s3_bucket_name
     if bucket is None:
@@ -221,6 +289,16 @@ def presigned_url(*, key: str, expires: int = 3600) -> str:
 
 async def get_file_info(*, key: str) -> StoredFileInfo:
     """获取文件元信息（不下载内容）。"""
+    if not _check_s3_available() or settings.s3_bucket_name is None:
+        path = _local_path(key)
+        if not path.exists():
+            raise FileNotFoundError(f"文件不存在: {key}")
+        return await to_thread.run_sync(lambda: StoredFileInfo(
+            key=_normalize_key(key),
+            url=_build_public_url(key),
+            size=path.stat().st_size,
+        ))
+
     client = _build_s3_client()
     bucket = settings.s3_bucket_name
     if bucket is None:
@@ -250,6 +328,21 @@ async def get_file_info(*, key: str) -> StoredFileInfo:
 
 async def list_files(*, prefix: str = "") -> list[StoredFileInfo]:
     """根据前缀列出文件（最多一页，若需翻页可扩展）。"""
+    if not _check_s3_available() or settings.s3_bucket_name is None:
+        root = _local_root()
+        if not root.exists():
+            return []
+        normalized_prefix = _normalize_key(prefix) if prefix else ""
+        results: list[StoredFileInfo] = []
+        for p in root.rglob("*"):
+            if not p.is_file():
+                continue
+            rel = str(p.relative_to(root)).replace("\\", "/")
+            if normalized_prefix and not rel.startswith(normalized_prefix):
+                continue
+            results.append(StoredFileInfo(key=rel, url=_build_public_url(rel), size=p.stat().st_size))
+        return results
+
     client = _build_s3_client()
     bucket = settings.s3_bucket_name
     if bucket is None:
@@ -281,6 +374,12 @@ async def list_files(*, prefix: str = "") -> list[StoredFileInfo]:
 
 async def delete_file(*, key: str) -> None:
     """删除文件。"""
+    if not _check_s3_available() or settings.s3_bucket_name is None:
+        path = _local_path(key)
+        if path.exists():
+            path.unlink()
+        return
+
     client = _build_s3_client()
     bucket = settings.s3_bucket_name
     if bucket is None:
