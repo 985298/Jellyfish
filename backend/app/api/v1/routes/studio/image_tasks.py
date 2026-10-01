@@ -24,6 +24,10 @@ from app.api.v1.routes.film.common import TaskCreated
 from app.services.studio.image_task_references import (
     resolve_reference_image_refs_by_file_ids as _resolve_reference_image_refs_by_file_ids_service,
 )
+from app.services.studio.image_tasks import (
+    render_character_combined_prompt,
+    render_prompt_template_content,
+)
 from app.services.studio.generation.asset_image import (
     build_actor_image_base_draft as _build_actor_image_base_draft_service,
     build_actor_image_submission_payload as _build_actor_image_submission_payload_service,
@@ -53,6 +57,9 @@ _CHARACTER_NEGATIVE_PROMPT = "五官不一致，变脸，不同人物，肢体�
 
 
 # Template mapping: relation_type -> (template_category, negative_prompt)
+# character_image / actor_image 走 combined 类别：优先用 DB 种子模板，
+# 缺省时回退到 app.services.studio.image_tasks.CHARACTER_COMBINED_TEMPLATE_CONTENT
+# （见 _apply_prompt_template 内置回退逻辑）。
 _TEMPLATE_MAP = {
     "character_image": ("combined", _CHARACTER_NEGATIVE_PROMPT),
     "actor_image": ("combined", _CHARACTER_NEGATIVE_PROMPT),
@@ -61,9 +68,20 @@ _TEMPLATE_MAP = {
     "costume_image": ("costume_image_front", _CHARACTER_NEGATIVE_PROMPT),
 }
 
+# 走 combined 类别且 DB 无模板时使用内置角色锚定模板的 relation_type。
+_CHARACTER_RELATION_TYPES = {"character_image", "actor_image"}
+
 
 async def _apply_prompt_template(db, relation_type: str, prompt: str) -> tuple[str, str | None]:
-    """Apply prompt template based on relation_type. Returns (full_prompt, negative_prompt)."""
+    """Apply prompt template based on relation_type. Returns (full_prompt, negative_prompt).
+
+    对 character_image / actor_image：
+    - 优先用 DB 中 combined 类别的模板（若存在）；
+    - DB 缺失时回退到内置的 CHARACTER_COMBINED_TEMPLATE_CONTENT，保证角色图提示词
+      质量与一致性约束不依赖种子数据；
+    - DB 模板若包含 `{{description}}` 占位，做兼容替换；若是完整 Jinja2 模板，
+      用 `render_prompt_template_content` 渲染。
+    """
     from app.models.studio_prompts_files_timeline import PromptTemplate
     from sqlalchemy import select
     mapping = _TEMPLATE_MAP.get(relation_type)
@@ -75,7 +93,19 @@ async def _apply_prompt_template(db, relation_type: str, prompt: str) -> tuple[s
         select(PromptTemplate).where(PromptTemplate.category == category).limit(1)
     )).scalars().first()
     if row and row.content:
-        full = row.content.replace("{{description}}", prompt)
+        content = row.content
+        if "{{description}}" in content:
+            # 兼容旧的占位符模板（DB 种子）：直接文本替换。
+            full = content.replace("{{description}}", prompt)
+        else:
+            # 视为 Jinja2 模板，按模板自带的 input_variables 渲染。
+            try:
+                full = render_prompt_template_content(content, variables={"description": prompt})
+            except Exception:
+                full = content.replace("{{description}}", prompt)
+    elif relation_type in _CHARACTER_RELATION_TYPES:
+        # DB 无 combined 模板：用内置角色锚定模板（仅 description 可用）。
+        full = render_character_combined_prompt(prompt)
     else:
         full = prompt
     return full, neg
