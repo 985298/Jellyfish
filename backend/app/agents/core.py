@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import Any, cast
 
 from langchain_core.prompts import PromptTemplate
@@ -156,6 +157,17 @@ class SpecialistAgent(AgentBase[AgentResult]):
                 structured.tool_calls_made = ctx.tool_results[-10:]
                 return structured
 
-            return AgentResult(output=content, tool_calls_made=ctx.tool_results[-10:])
+            # Fallback: when structured_response isn't parsed (some providers
+            # return it as text), extract next_action from the content string.
+            next_action = None
+            m = re.search(r"next_action[:\s]+['\"]?(\w+)['\"]?", content)
+            if m:
+                next_action = m.group(1)
+
+            return AgentResult(
+                output=content,
+                next_action=next_action,
+                tool_calls_made=ctx.tool_results[-10:],
+            )
 
         return AgentResult(output=str(result))
