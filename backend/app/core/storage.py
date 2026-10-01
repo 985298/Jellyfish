@@ -35,15 +35,35 @@ def _build_s3_client():
     if not settings.s3_bucket_name:
         raise RuntimeError("S3 未配置：请在配置中设置 s3_bucket_name 等必要字段")
 
+    # RustFS / MinIO 等 S3 兼容服务部署在 docker 内部网络时，virtual-host 风格会
+    # 生成 http://<bucket>.rustfs:9000/... 这样的 URL，DNS 无法解析。
+    # path 风格生成 http://rustfs:9000/<bucket>/...，与 render.py 保持一致。
     client = boto3.client(
         "s3",
         endpoint_url=settings.s3_endpoint_url,
         region_name=settings.s3_region_name,
         aws_access_key_id=settings.s3_access_key_id,
         aws_secret_access_key=settings.s3_secret_access_key,
-        config=BotoConfig(s3={"addressing_style": "virtual"}),
+        config=BotoConfig(signature_version="s3v4", s3={"addressing_style": "path"}),
     )
     return client
+
+
+# RustFS / 部分自建 MinIO 在禁用 ACL 时会拒绝 x-amz-acl: public-read，
+# 错误码常见：AccessControlListNotSupported / NotImplemented / InvalidRequest。
+# 命中这类错误时去掉 ACL 重试一次，避免视频/图片上传整体失败。
+_ACL_RETRY_ERROR_CODE_FRAGMENTS = (
+    "accesscontrollistnotsupported",
+    "notimplemented",
+    "acl",
+    "x-amz-acl",
+)
+
+
+def _is_acl_related_error(exc: ClientError) -> bool:
+    code = str(exc.response.get("Error", {}).get("Code", "") or "").lower()
+    msg = str(exc.response.get("Error", {}).get("Message", "") or "").lower()
+    return any(frag in code or frag in msg for frag in _ACL_RETRY_ERROR_CODE_FRAGMENTS)
 
 
 def _normalize_key(key: str) -> str:
@@ -138,8 +158,21 @@ async def upload_file(
 
     def _upload():
         if isinstance(data, (bytes, bytearray)):
-            return client.put_object(Bucket=bucket, Key=s3_key, Body=data, **extra)
-        return client.upload_fileobj(data, bucket, s3_key, ExtraArgs=extra)  # type: ignore[arg-type]
+            try:
+                return client.put_object(Bucket=bucket, Key=s3_key, Body=data, **extra)
+            except ClientError as exc:
+                # RustFS / 某些自建 MinIO 不支持 ACL；命中后去掉 ACL 重试一次。
+                if extra and _is_acl_related_error(exc) and "ACL" in extra:
+                    retry_extra = {k: v for k, v in extra.items() if k != "ACL"}
+                    return client.put_object(Bucket=bucket, Key=s3_key, Body=data, **retry_extra)
+                raise
+        try:
+            return client.upload_fileobj(data, bucket, s3_key, ExtraArgs=extra)  # type: ignore[arg-type]
+        except ClientError as exc:
+            if extra and _is_acl_related_error(exc) and "ACL" in extra:
+                retry_extra = {k: v for k, v in extra.items() if k != "ACL"}
+                return client.upload_fileobj(data, bucket, s3_key, ExtraArgs=retry_extra)  # type: ignore[arg-type]
+            raise
 
     result = await to_thread.run_sync(_upload)
 
@@ -166,6 +199,24 @@ async def download_file(*, key: str) -> bytes:
         return body  # type: ignore[no-any-return]
 
     return await to_thread.run_sync(_download)
+
+
+def presigned_url(*, key: str, expires: int = 3600) -> str:
+    """生成预签名下载 URL。
+
+    RustFS / MinIO 默认不公开对象；`_build_public_url` 拼出的直链在私有时无法访问。
+    渲染链路 / Gateway 下载应改用预签名 URL，凭 S3 凭证签发，过期失效。
+    """
+    client = _build_s3_client()
+    bucket = settings.s3_bucket_name
+    if bucket is None:
+        raise RuntimeError("S3 未配置：缺少 s3_bucket_name")
+    s3_key = _normalize_key(key)
+    return client.generate_presigned_url(
+        "get_object",
+        Params={"Bucket": bucket, "Key": s3_key},
+        ExpiresIn=expires,
+    )
 
 
 async def get_file_info(*, key: str) -> StoredFileInfo:

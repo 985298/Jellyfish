@@ -212,6 +212,8 @@ async def persist_generated_video_to_shot(
     if provider == "openai":
         url_headers = {"Authorization": f"Bearer {api_key}"}
 
+    # 视频文件通常较大（几十 MB），单次 GET 容易在网关侧超时或把内存打爆。
+    # 用流式下载 + 分块写入，避免一次性 resp.content 把整个视频读进内存。
     file_obj = await create_file_from_url_or_b64(
         session,
         url=url,
@@ -219,6 +221,7 @@ async def persist_generated_video_to_shot(
         prefix=f"generated-videos/shots/{shot_id}",
         url_request_headers=url_headers,
         httpx_timeout=600.0,
+        stream=True,
     )
 
     link_stmt = (

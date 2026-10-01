@@ -48,6 +48,19 @@ class AbstractVideoGenerationTask(BaseTask, ABC):
     async def _sleep_poll(self) -> None:
         await asyncio.sleep(self._poll_interval_s)
 
+    def _poll_deadline(self) -> float:
+        """供应商轮询的软截止时间。
+
+        外层 Worker 用 asyncio.wait_for 给整个 task 兜底（默认 3600s），
+        但轮询循环本身没有中断点；这里以 timeout_s 为软截止，
+        让长时间不返回终态的供应商任务能更快失败、把错误写进 task.error，
+        而不是被外层硬超时一刀切掉，前端只看到 "Task timed out"。
+        """
+        return asyncio.get_event_loop().time() + max(self._timeout_s, 30.0)
+
+    async def _sleep_poll(self) -> None:
+        await asyncio.sleep(self._poll_interval_s)
+
     @abstractmethod
     async def _create_task(self) -> None:
         """发起供应商创建任务请求，并设置 self._provider_task_id。"""
@@ -119,6 +132,7 @@ class OpenAIVideoGenerationTask(AbstractVideoGenerationTask):
 
         base_url = (self._cfg.base_url or "https://api.openai.com/v1").rstrip("/")
         status_val = ""
+        deadline = self._poll_deadline()
         while True:
             meta = await self._adapter.get_video(
                 cfg=self._cfg,
@@ -130,6 +144,11 @@ class OpenAIVideoGenerationTask(AbstractVideoGenerationTask):
                 if status_val == "failed":
                     raise RuntimeError(f"OpenAI video failed: {meta.get('error')!r}")
                 break
+            if asyncio.get_event_loop().time() > deadline:
+                raise RuntimeError(
+                    f"OpenAI video poll timed out after {self._timeout_s}s: "
+                    f"video_id={video_id} last_status={status_val!r}"
+                )
             await self._sleep_poll()
 
         return VideoGenerationResult(
@@ -176,6 +195,7 @@ class VolcengineVideoGenerationTask(AbstractVideoGenerationTask):
         base_url = (self._cfg.base_url or "https://ark.cn-beijing.volces.com/api/v3").rstrip("/")
         status_val = ""
         video_url: str | None = None
+        deadline = self._poll_deadline()
         while True:
             meta = await self._adapter.get_contents_task(
                 cfg=self._cfg,
@@ -192,6 +212,11 @@ class VolcengineVideoGenerationTask(AbstractVideoGenerationTask):
                 if status_val != "succeeded":
                     raise RuntimeError(f"Volcengine task not succeeded: status={status_val!r} meta={meta!r}")
                 break
+            if asyncio.get_event_loop().time() > deadline:
+                raise RuntimeError(
+                    f"Volcengine poll timed out after {self._timeout_s}s: "
+                    f"task_id={task_id} last_status={status_val!r}"
+                )
             await self._sleep_poll()
 
         if not video_url:

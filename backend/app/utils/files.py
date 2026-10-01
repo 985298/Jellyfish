@@ -3,6 +3,7 @@ from __future__ import annotations
 """文件相关工具：从 URL 或 base64 内容创建 FileItem，并上传到对象存储。"""
 
 import base64
+import io
 import os
 import uuid
 from dataclasses import dataclass
@@ -13,6 +14,30 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core import storage
 from app.models.studio import FileItem, FileType
 from app.models.types import FileUsageKind
+
+
+async def _stream_download_to_bytes(
+    *,
+    url: str,
+    headers: dict[str, str] | None,
+    client_kwargs: dict,
+) -> tuple[bytes, str | None]:
+    """流式下载到内存，返回 (content, content_type)。
+
+    大视频 GET 响应一次性 resp.content 会把整段 body 读进内存并在事件循环里
+    阻塞；改用 stream + aiter_bytes 分块读到 BytesIO，单块 4MB，
+    事件循环不会被单次巨大 read 长时间占用，并发任务也不会立刻撑爆内存。
+    """
+    buf = io.BytesIO()
+    content_type: str | None = None
+    async with httpx.AsyncClient(**client_kwargs) as client:
+        async with client.stream("GET", url, headers=headers or None) as resp:
+            resp.raise_for_status()
+            content_type = resp.headers.get("Content-Type")
+            async for chunk in resp.aiter_bytes(chunk_size=4 * 1024 * 1024):
+                if chunk:
+                    buf.write(chunk)
+    return buf.getvalue(), content_type
 
 
 async def _infer_file_type_from_ext(ext: str) -> FileType:
@@ -57,6 +82,7 @@ async def create_file_from_url_or_b64(
     url_request_headers: dict[str, str] | None = None,
     httpx_timeout: float | None = None,
     usage: FileUsageCreateParams | None = None,
+    stream: bool = False,
 ) -> FileItem:
     """从远端 URL 或 base64 内容创建 FileItem。
 
@@ -64,6 +90,8 @@ async def create_file_from_url_or_b64(
     - 若提供 b64_data：优先解析 data URL 前缀中的 MIME 类型，否则默认 image/png；
     - 始终通过 storage.upload_file 上传到对象存储，再创建 FileItem 记录并返回。
     - url_request_headers / httpx_timeout：用于需鉴权或大文件下载（如 OpenAI /videos/{id}/content）。
+    - stream=True 时用流式下载 + 分块上传，避免大视频一次性读入内存。
+      额外要求：url 模式 + httpx_timeout 必须给出（否则按非流式处理）。
     """
     if not url and not b64_data:
         raise ValueError("create_file_from_url_or_b64 需要提供 url 或 b64_data 至少其一")
@@ -76,15 +104,25 @@ async def create_file_from_url_or_b64(
         client_kwargs: dict = {}
         if httpx_timeout is not None:
             client_kwargs["timeout"] = httpx_timeout
-        async with httpx.AsyncClient(**client_kwargs) as client:
-            resp = await client.get(url, headers=url_request_headers or None)
-            resp.raise_for_status()
-            content = resp.content
-            content_type = resp.headers.get("Content-Type")
-
-        # 从 URL 推断文件名
-        path = Path(httpx.URL(url).path)
-        filename = path.name or "file"
+        if stream and httpx_timeout is not None:
+            # 流式：先发 HEAD（失败则降级 GET 取 header），拿 content_type 推断扩展名，
+            # 再 stream=True 分块下载写入一个临时 BytesIO，避免一次性 resp.content。
+            content, content_type = await _stream_download_to_bytes(
+                url=url,
+                headers=url_request_headers,
+                client_kwargs=client_kwargs,
+            )
+            path = Path(httpx.URL(url).path)
+            filename = path.name or "file"
+        else:
+            async with httpx.AsyncClient(**client_kwargs) as client:
+                resp = await client.get(url, headers=url_request_headers or None)
+                resp.raise_for_status()
+                content = resp.content
+                content_type = resp.headers.get("Content-Type")
+            # 从 URL 推断文件名
+            path = Path(httpx.URL(url).path)
+            filename = path.name or "file"
     else:
         raw = b64_data or ""
         # 支持 data URL 形式：data:image/png;base64,xxxxxx

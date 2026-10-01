@@ -25,6 +25,8 @@ MEDIA_SERVICE_DIR = os.environ.get("MEDIA_SERVICE_DIR", os.path.abspath(os.path.
 
 
 def _s3_client():
+    # 与 app.core.storage._build_s3_client 保持一致：path 风格 + s3v4，
+    # 兼容 RustFS / MinIO（virtual-host 风格在 docker 内网无法解析）。
     return boto3.client(
         "s3",
         endpoint_url=settings.s3_endpoint_url,
