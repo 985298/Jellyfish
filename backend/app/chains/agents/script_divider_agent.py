@@ -21,7 +21,6 @@ _SCRIPT_DIVIDER_SYSTEM_PROMPT = """\
 - camera_shot（景别：CU近景/MS中景/WS全景/ELS远景）
 - angle（角度：EYE_LEVEL平视/HIGH_ANGLE俯拍/LOW_ANGLE仰拍）
 - movement（运镜：STATIC固定/PAN摇镜/TILT俯仰/PUSH推入/PULL拉出/TRACKING跟踪，根据镜头内容选择有动感的运镜）
-- duration（建议时长秒数：全景5s、对话6-8s、冲突动作8-10s）
 - duration（建议时长秒数：全景镜头5秒、对话镜头6-8秒、冲突动作镜头8-10秒）
 只输出 JSON，符合 ScriptDivisionResult 结构。
 """
