@@ -26,6 +26,7 @@ class ShotDivision(BaseModel):
 
     shot_name: str = Field("", description="镜头名称（分镜名/镜头标题）")
     time_of_day: Optional[str] = Field(None, description="时间（日/夜/未知等，可选）")
+    duration: int = Field(default=6, ge=3, le=15, description="建议时长（秒）：全景5s、对话6-8s、冲突动作8-10s")
 
     @field_validator("time_of_day", mode="before")
     @classmethod

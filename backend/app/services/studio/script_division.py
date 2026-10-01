@@ -40,7 +40,7 @@ def _append_division_rows(
                 movement=CameraMovement.static,
                 follow_atmosphere=True,
                 vfx_type=VFXType.none,
-                duration=4,
+                duration=getattr(shot_division, 'duration', 6) or 6,
             )
         )
 

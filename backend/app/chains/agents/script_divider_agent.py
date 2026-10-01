@@ -18,6 +18,7 @@ _SCRIPT_DIVIDER_SYSTEM_PROMPT = """\
 - shot_name（镜头名称/镜头标题，分镜名；一句话描述该镜头画面/动作；不要把它当作场景名）
 - script_excerpt（镜头对应的剧本摘录/文本）
 - time_of_day
+- duration（建议时长秒数：全景镜头5秒、对话镜头6-8秒、冲突动作镜头8-10秒）
 只输出 JSON，符合 ScriptDivisionResult 结构。
 """
 
