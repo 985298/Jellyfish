@@ -154,6 +154,11 @@ class ScriptDividerAgent(AgentBase[ScriptDivisionResult]):
                 shot_dict.setdefault("shot_name", "")
                 shot_dict.pop("character_names_in_text", None)
                 shot_dict.pop("character_ids", None)
+                # 丢弃 LLM 可能多输出的字段（如画面过程描述、核心创意等中文字段名）
+                _ALLOWED = {"index", "start_line", "end_line", "script_excerpt", "shot_name",
+                            "time_of_day", "duration", "camera_shot", "angle", "movement",
+                            "description", "character_names", "scene_name"}
+                shot_dict = {k: v for k, v in shot_dict.items() if k in _ALLOWED}
                 shots.append(shot_dict)
             data["shots"] = shots
 
