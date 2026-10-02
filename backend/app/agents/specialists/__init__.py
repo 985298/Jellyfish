@@ -37,6 +37,7 @@ _AGENT_TOOL_NAMES: dict[str, list[str]] = {
         "get_chapter_script",
         "extract_assets",
         "generate_image",
+        "generate_asset_refs",
         "check_asset_status",
         "query_assets",
     ],
@@ -70,6 +71,7 @@ def _build_tool_registry() -> dict[str, Tool]:
         QueryAssetsTool,
     )
     from app.agents.tools.media_tools import GenerateFrameTool, GenerateVideoTool, GenerateVideosBatchTool
+    from app.agents.tools.asset_ref_generator import GenerateAssetRefsTool
     from app.agents.tools.shot_tools import (
         BindAssetsTool,
         ExtractShotsTool,
@@ -89,6 +91,7 @@ def _build_tool_registry() -> dict[str, Tool]:
         "generate_frame": GenerateFrameTool(),
         "generate_video": GenerateVideoTool(),
         "generate_videos_batch": GenerateVideosBatchTool(),
+        "generate_asset_refs": GenerateAssetRefsTool(),
         "check_task_status": CheckTaskStatusTool(),
         "retry_task": RetryTaskTool(),
     }
