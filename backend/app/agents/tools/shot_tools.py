@@ -63,6 +63,7 @@ class BindAssetsInput(BaseModel):
 
 
 class BindAssetsTool(Tool):
+    """DEPRECATED: asset binding now done in divide_shots stage, no need to call separately."""
     name = "bind_assets"
     description = "Bind existing project assets to shots (chapter_id and project_id from context, no parameters needed)"
     input_model = BindAssetsInput

@@ -121,6 +121,7 @@ class GenerationTask(Base, TimestampMixin):
     executor_task_id: Mapped[str | None] = mapped_column(
         String(128),
         nullable=True,
+        index=True,
         comment="执行器侧任务 ID，如 celery task id",
     )
 

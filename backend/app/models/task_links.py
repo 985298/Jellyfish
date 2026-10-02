@@ -1,4 +1,4 @@
-"""Studio 域与生成任务（GenerationTask）的关联表（方案 B：分表强外键）。
+"""Studio 域与生成任务（GenerationTask）的关联表（方案 B：分表 + 多态关联（task_id 强外键，relation_entity_id 为多态字符串无 FK））。
 
 设计目标：
 - 不污染 `GenerationTask`（保持 task 模块独立）

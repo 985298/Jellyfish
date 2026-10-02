@@ -26,7 +26,7 @@ class Scene(Base, TimestampMixin):
     tags: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list, comment="标签")
     project_id: Mapped[str | None] = mapped_column(
         String(64),
-        ForeignKey("projects.id", ondelete="SET NULL"),
+        ForeignKey("projects.id", ondelete="CASCADE"),
         nullable=True,
         index=True,
         comment="所属项目 ID（可空；项目删除时资产保留但标记为游离）",
@@ -77,7 +77,7 @@ class Prop(Base, TimestampMixin):
     tags: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list, comment="标签")
     project_id: Mapped[str | None] = mapped_column(
         String(64),
-        ForeignKey("projects.id", ondelete="SET NULL"),
+        ForeignKey("projects.id", ondelete="CASCADE"),
         nullable=True,
         index=True,
         comment="所属项目 ID（可空；项目删除时资产保留但标记为游离）",
@@ -133,7 +133,7 @@ class Costume(Base, TimestampMixin):
     tags: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list, comment="标签")
     project_id: Mapped[str | None] = mapped_column(
         String(64),
-        ForeignKey("projects.id", ondelete="SET NULL"),
+        ForeignKey("projects.id", ondelete="CASCADE"),
         nullable=True,
         index=True,
         comment="所属项目 ID（可空；项目删除时资产保留但标记为游离）",
