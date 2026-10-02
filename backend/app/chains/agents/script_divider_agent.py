@@ -136,6 +136,17 @@ class ScriptDividerAgent(AgentBase[ScriptDivisionResult]):
         data = dict(data)
 
         # 兼容：LLM 可能输出 {"ScriptDivisionResult": {...}} 或 {"ScriptDivisionResult": [...]}
+        # 兼容：LLM 可能输出 {"episodes": [{"episode_title": ..., "shots": [...]}]}
+        if "episodes" in data and "shots" not in data:
+            episodes = data.get("episodes")
+            if isinstance(episodes, list) and len(episodes) > 0:
+                first_ep = episodes[0]
+                if isinstance(first_ep, dict) and "shots" in first_ep:
+                    data = dict(first_ep)
+                elif isinstance(first_ep, dict) and "episode_title" in first_ep:
+                    # episodes wrapper but shots not keyed — treat episode dict as data
+                    data = dict(first_ep)
+
         if "ScriptDivisionResult" in data:
             inner = data.get("ScriptDivisionResult")
             if isinstance(inner, list):
@@ -180,6 +191,9 @@ class ScriptDividerAgent(AgentBase[ScriptDivisionResult]):
 
         if "total_shots" not in data and "shots" in data:
             data["total_shots"] = len(data["shots"])
+
+        _TOP_ALLOWED = {"shots", "total_shots", "notes"}
+        data = {k: v for k, v in data.items() if k in _TOP_ALLOWED}
 
         return data
 

@@ -26,6 +26,54 @@ from app.schemas.skills.script_processing import ScriptDivisionResult
 from app.services.common import entity_not_found, require_entity
 
 
+
+_CAMERA_SHOT_CN_MAP = {
+    "大特写": "ecu", "特写": "cu", "中近景": "mcu", "中景": "ms",
+    "中远景": "mls", "远景": "ls", "大远景": "els",
+    "全景": "ls", "近景": "cu", "半身": "ms", "全身": "ls",
+}
+
+_CAMERA_ANGLE_CN_MAP = {
+    "平视": "eye_level", "高角度": "high_angle", "低角度": "low_angle",
+    "鸟瞰": "bird_eye", "荷兰式": "dutch", "过肩": "over_shoulder",
+    "俯视": "high_angle", "俯拍": "high_angle", "仰视": "low_angle", "仰拍": "low_angle",
+    "仰角": "low_angle", "俯角": "high_angle",
+}
+
+_CAMERA_MOVEMENT_CN_MAP = {
+    "静止": "static", "平移": "pan", "倾斜": "tilt", "拉近": "dolly_in",
+    "拉远": "dolly_out", "轨道": "track", "摇臂": "crane", "手持": "handheld",
+    "稳定器": "steadicam", "推入": "dolly_in", "拉出": "dolly_out",
+    "跟随": "track", "跟拍": "track", "下降": "crane", "上升": "crane",
+    "变焦": "zoom_in", "缓推": "dolly_in", "缓拉": "dolly_out",
+    "环绕": "track", "旋转": "pan",
+}
+
+
+def _normalize_enum(value, mapping, enum_class, default):
+    if not value:
+        return default
+    v = value.strip()
+    # Try direct enum match (by value, uppercase)
+    try:
+        return enum_class(v.upper())
+    except ValueError:
+        pass
+    # Try by name (lowercase)
+    try:
+        return enum_class[v.lower()]
+    except KeyError:
+        pass
+    # Try Chinese mapping (by name)
+    for cn, en in mapping.items():
+        if cn in value:
+            try:
+                return enum_class[en]
+            except KeyError:
+                pass
+    return default
+
+
 def _append_division_rows(
     db_add,
     *,
@@ -48,9 +96,9 @@ def _append_division_rows(
             ShotDetail(
                 id=shot_id,
                 description=shot_division.description,
-                camera_shot=getattr(shot_division, 'camera_shot', None) and CameraShotType(getattr(shot_division, 'camera_shot', '').lower()) or CameraShotType.ms,
-                angle=getattr(shot_division, 'angle', None) and CameraAngle(getattr(shot_division, 'angle', '').lower()) or CameraAngle.eye_level,
-                movement=getattr(shot_division, 'movement', None) and CameraMovement(getattr(shot_division, 'movement', '').lower()) or CameraMovement.static,
+                camera_shot=_normalize_enum(getattr(shot_division, 'camera_shot', None), _CAMERA_SHOT_CN_MAP, CameraShotType, CameraShotType.ms),
+                angle=_normalize_enum(getattr(shot_division, 'angle', None), _CAMERA_ANGLE_CN_MAP, CameraAngle, CameraAngle.eye_level),
+                movement=_normalize_enum(getattr(shot_division, 'movement', None), _CAMERA_MOVEMENT_CN_MAP, CameraMovement, CameraMovement.static),
                 follow_atmosphere=True,
                 vfx_type=VFXType.none,
                 duration=getattr(shot_division, 'duration', 6) or 6,
