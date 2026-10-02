@@ -25,6 +25,7 @@ class GenerateFrameInput(BaseModel):
     shot_id: str = Field(description="shot id")
     frame_type: str = Field(default="first", description="first / last / key")
     prompt: str | None = Field(default=None, description="custom prompt (auto-built from shot detail if empty)")
+    image_url: str | None = Field(default=None, description="character reference image URL for img2img")
 
     @field_validator("frame_type", mode="before")
     @classmethod
@@ -46,59 +47,48 @@ class GenerateFrameTool(Tool):
     async def execute(self, ctx: AgentContext, **kwargs) -> dict:
         data = GenerateFrameInput(**kwargs)
         async with async_session_maker() as db:
-            # Load shot with detail to build a default prompt
             shot = (
                 await db.execute(
-                    select(Shot)
-                    .where(Shot.id == data.shot_id)
-                    .options(selectinload(Shot.detail))
+                    select(Shot).where(Shot.id == data.shot_id).options(selectinload(Shot.detail))
                 )
             ).scalars().first()
             if shot is None:
                 return {"error": "shot not found", "shot_id": data.shot_id}
             prompt = data.prompt
             if not prompt and shot.detail is not None:
-                detail = shot.detail
-                prompt = (
-                    getattr(detail, "first_frame_prompt", "")
-                    or detail.description
-                    or shot.title
-                )
+                prompt = getattr(shot.detail, "first_frame_prompt", "") or shot.detail.description or shot.title
             if not prompt:
                 prompt = shot.title
 
-            # Find or create a ShotFrameImage row; the runner expects its id.
             frame_row = (
                 await db.execute(
-                    select(ShotFrameImage)
-                    .where(
+                    select(ShotFrameImage).where(
                         ShotFrameImage.shot_detail_id == data.shot_id,
                         ShotFrameImage.frame_type == data.frame_type,
-                    )
-                    .limit(1)
+                    ).limit(1)
                 )
             ).scalars().first()
             if frame_row is None:
-                frame_row = ShotFrameImage(
-                    shot_detail_id=data.shot_id,
-                    frame_type=data.frame_type,
-                    format="png",
-                )
+                frame_row = ShotFrameImage(shot_detail_id=data.shot_id, frame_type=data.frame_type, format="png")
                 db.add(frame_row)
                 await db.flush()
+
+            # Route B: if image_url provided, use direct API img2img
+            if data.image_url:
+                from app.agents.tools.direct_api import get_image_api_config, direct_image_generate, save_image_to_db
+                api_key, base_url, model_name = await get_image_api_config(db)
+                result_url = await direct_image_generate(api_key, base_url, model_name, prompt, image_url=data.image_url)
+                file_id = await save_image_to_db(db, result_url, "shot-%s-frame" % data.shot_id, "generated-images/frames")
+                frame_row.file_id = file_id
+                await db.commit()
+                return {"file_id": file_id, "shot_id": data.shot_id, "frame_type": data.frame_type, "prompt": prompt, "img2img": True}
+
+            # Fallback: use existing task-based flow
             task_id = await create_image_task_and_link(
-                db=db,
-                model_id=None,
-                relation_type="shot_frame_image",
-                relation_entity_id=str(frame_row.id),
-                prompt=prompt,
+                db=db, model_id=None, relation_type="shot_frame_image",
+                relation_entity_id=str(frame_row.id), prompt=prompt,
             )
-        return {
-            "task_id": task_id,
-            "shot_id": data.shot_id,
-            "frame_type": data.frame_type,
-            "prompt": prompt,
-        }
+        return {"task_id": task_id, "shot_id": data.shot_id, "frame_type": data.frame_type, "prompt": prompt}
 
 
 class GenerateVideoInput(BaseModel):
@@ -221,7 +211,35 @@ class GenerateVideosBatchTool(Tool):
     async def execute(self, ctx: AgentContext, **kwargs) -> dict:
         data = GenerateVideosBatchInput(**kwargs)
         async with async_session_maker() as db:
-            from app.api.v1.routes.film.common import _CreateOnlyTask
+            from app.agents.tools.direct_api import get_video_api_config, direct_video_generate, save_video_to_db, get_keyframe_url
+            from app.models.studio import ShotDetail
+            api_key, base_url, model_name = await get_video_api_config(db)
+            ratio = getattr(await db.get(Project, ctx.project_id), "default_video_ratio", None) or "9:16"
+            shot_ids = data.shot_ids
+            if not shot_ids and ctx.chapter_id:
+                shot_ids = [str(r) for r in (await db.execute(select(Shot.id).where(Shot.chapter_id == ctx.chapter_id).order_by(Shot.index))).scalars().all()]
+            results = []
+            succeeded = 0
+            failed = 0
+            for sid in shot_ids:
+                try:
+                    kf_url = await get_keyframe_url(db, sid)
+                    detail = await db.get(ShotDetail, sid)
+                    prompt = (detail.description if detail and detail.description else "") or ""
+                    seconds = detail.duration if detail and detail.duration else 12
+                    if not kf_url or not prompt:
+                        results.append({"shot_id": sid, "error": "missing keyframe or description"})
+                        failed += 1
+                        continue
+                    video_url = await direct_video_generate(api_key, base_url, model_name, prompt, kf_url, seconds, ratio)
+                    file_id = await save_video_to_db(db, video_url, sid, api_key)
+                    await db.commit()
+                    results.append({"shot_id": sid, "file_id": file_id, "status": "completed"})
+                    succeeded += 1
+                except Exception as exc:
+                    results.append({"shot_id": sid, "error": str(exc)[:200]})
+                    failed += 1
+            return {"total": len(shot_ids), "succeeded": succeeded, "failed": failed, "results": results}
             from app.core.task_manager import DeliveryMode, SqlAlchemyTaskStore, TaskManager
             from app.models.task_links import GenerationTaskLink
             from app.models.studio_projects import Project
