@@ -137,6 +137,14 @@ class ScriptDividerAgent(AgentBase[ScriptDivisionResult]):
                 )
                 if "index" not in shot_dict:
                     shot_dict["index"] = idx + 1
+                # 兼容：LLM 可能用 shot_id 代替 index
+                if "shot_id" in shot_dict and "index" not in shot_dict:
+                    shot_dict["index"] = int(shot_dict.pop("shot_id"))
+                elif "shot_id" in shot_dict:
+                    shot_dict.pop("shot_id")
+                # 兼容：LLM 可能不输出 start_line/end_line
+                shot_dict.setdefault("start_line", idx + 1)
+                shot_dict.setdefault("end_line", idx + 1)
                 # 兼容：LLM 可能用 title/shot_title 代替 shot_name
                 if "shot_name" not in shot_dict:
                     if "title" in shot_dict:
@@ -144,8 +152,6 @@ class ScriptDividerAgent(AgentBase[ScriptDivisionResult]):
                     elif "shot_title" in shot_dict:
                         shot_dict["shot_name"] = str(shot_dict.pop("shot_title"))
                 shot_dict.setdefault("shot_name", "")
-                # 严格对齐 ShotDivision：移除已废弃的弱语义字段，避免 extra="forbid" 校验失败
-                shot_dict.pop("scene_name", None)
                 shot_dict.pop("character_names_in_text", None)
                 shot_dict.pop("character_ids", None)
                 shots.append(shot_dict)
