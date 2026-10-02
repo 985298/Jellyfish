@@ -49,19 +49,19 @@ _ASSET_SPECS: tuple[tuple[str, type, type, str, str], ...] = (
 
 # 制作阶段顺序；next_step 取第一个"未完成"的阶段。
 _STAGE_LABELS: dict[str, str] = {
-    "build_assets": "提取资产并生成图片",
-    "extract_shots": "提取分镜",
-    "bind_assets": "绑定资产到分镜",
-    "generate_frames": "生成帧图",
+    "extract_assets": "提取资产（角色/场景/道具入库）",
+    "generate_asset_refs": "生成角色/场景参考图",
+    "divide_shots": "分镜（Agnes 三段式提示词）",
+    "generate_keyframes": "生成关键帧（img2img）",
     "generate_videos": "生成视频",
     "completed": "全部完成",
 }
 
 _STAGE_ORDER: tuple[str, ...] = (
-    "build_assets",
-    "extract_shots",
-    "bind_assets",
-    "generate_frames",
+    "extract_assets",
+    "generate_asset_refs",
+    "divide_shots",
+    "generate_keyframes",
     "generate_videos",
 )
 
@@ -130,6 +130,7 @@ async def collect_asset_stats(db: AsyncSession, project_id: str) -> dict[str, An
         "total": total,
         "ready": ready_total,
         "pending": total - ready_total,
+        "has_refs": total > 0 and (total - ready_total) == 0,
         # gaps 只含缺图资产；镜头类缺口由 collect_shot_stats 单独产出。
         "gaps": gaps,
     }
@@ -316,13 +317,15 @@ def recommend_next_step(assets: dict[str, Any], shots: dict[str, Any]) -> dict[s
     """按制作阶段顺序取第一个未完成阶段作为推荐下一步。"""
     stage = "completed"
     if assets["total"] == 0 or assets["pending"] > 0:
-        stage = "build_assets"
+        stage = "extract_assets"
+    elif not assets.get("has_refs", False):
+        stage = "generate_asset_refs"
     elif shots["total"] == 0:
-        stage = "extract_shots"
-    elif shots["with_detail"] < shots["total"]:
-        stage = "bind_assets"
+        stage = "divide_shots"
+    elif shots.get("with_detail", 0) < shots["total"]:
+        stage = "divide_shots"
     elif shots["with_first_frame"] < shots["total"]:
-        stage = "generate_frames"
+        stage = "generate_keyframes"
     elif shots["with_video"] < shots["total"]:
         stage = "generate_videos"
     return {"stage": stage, "label": _STAGE_LABELS[stage]}

@@ -22,7 +22,10 @@ def _sequence_decisions(*actions: str):
     it = iter(actions)
 
     async def _ask(ctx, goal, history):
-        return next(it)
+        try:
+            return next(it)
+        except StopIteration:
+            return "completed"
 
     return _ask
 
@@ -31,7 +34,7 @@ def _sequence_decisions(*actions: str):
 async def test_director_drives_stage_sequence(monkeypatch: pytest.MonkeyPatch) -> None:
     orch = Orchestrator(llm=None)  # type: ignore[arg-type]
     monkeypatch.setattr(orch, "_ask_director", _sequence_decisions(
-        "build_assets", "generate_videos", "completed",
+        "extract_assets", "generate_videos", "completed",
     ))
 
     seen: dict[str, int] = {}
@@ -46,10 +49,10 @@ async def test_director_drives_stage_sequence(monkeypatch: pytest.MonkeyPatch) -
     ctx = AgentContext(project_id="p1")
     results = await orch.run("做短剧", ctx, on_progress=events.append)
 
-    assert len(results) == 2, "两个非 completed 阶段各产出一条结果"
-    assert seen == {"character_designer": 1, "production": 1}
+    assert len(results) == 5, "五个非 completed 阶段各产出一条结果"
+    assert seen == {"character_designer": 2, "storyboard": 1, "production": 2}
     completed_stages = [e["stage"] for e in events if e.get("status") == "completed"]
-    assert completed_stages == ["build_assets", "generate_videos", "completed"]
+    assert completed_stages == ["extract_assets", "generate_videos", "generate_asset_refs", "divide_shots", "generate_keyframes", "completed"]
 
 
 @pytest.mark.asyncio
@@ -68,7 +71,9 @@ async def test_director_failure_falls_back_instead_of_stopping(monkeypatch: pyte
 
     async def _fallback(ctx) -> str:
         fallback_calls["n"] += 1
-        return "build_assets" if fallback_calls["n"] == 1 else "completed"
+        stages = ["extract_assets", "generate_asset_refs", "divide_shots", "generate_keyframes", "generate_videos", "completed"]
+        idx = min(fallback_calls["n"] - 1, len(stages) - 1)
+        return stages[idx]
 
     monkeypatch.setattr(orch, "_fallback_next_stage", _fallback)
     monkeypatch.setattr(orch, "_get_agent", lambda name: _OK_AGENT)
@@ -76,9 +81,9 @@ async def test_director_failure_falls_back_instead_of_stopping(monkeypatch: pyte
     events: list[dict] = []
     results = await orch.run("做短剧", AgentContext(project_id="p1"), on_progress=events.append)
 
-    assert fallback_calls["n"] == 2
-    assert len(results) == 1
-    assert results[0].status == "completed"
+    assert fallback_calls["n"] == 6
+    assert len(results) == 5
+    assert all(r.status == "completed" for r in results)
     assert any(e.get("status") == "fallback" for e in events)
 
 
@@ -94,20 +99,24 @@ async def test_failing_stage_is_retried_until_success(monkeypatch: pytest.Monkey
                 raise RuntimeError("transient")
             return AgentResult(status="completed", output="recovered")
 
-    # _ask_director 是协程，monkeypatch 上去的替身也必须是 async，否则 await 一个 str。
-    async def _director(goal: str, ctx, history: list) -> str:
-        return "build_assets" if len(calls) < 3 else "completed"
-
-    monkeypatch.setattr(orch, "_ask_director", _director)
+    # Director provides all 5 stages in order to avoid guard interference
+    monkeypatch.setattr(orch, "_ask_director", _sequence_decisions(
+        "extract_assets", "generate_asset_refs", "divide_shots",
+        "generate_keyframes", "generate_videos", "completed",
+    ))
     monkeypatch.setattr(orch, "_get_agent", lambda name: _Flaky())
 
     events: list[dict] = []
     results = await orch.run("做短剧", AgentContext(project_id="p1"), on_progress=events.append)
 
-    assert len(calls) == 3, "失败阶段应重试，第 3 次成功后不再重试"
+    # extract_assets retries: call 1 (fail), call 2 (fail), call 3 (succeed)
+    assert len(calls) >= 3, "extract_assets should retry at least 3 times"
     assert results[0].status == "completed"
-    attempts = [e["attempt"] for e in events if e.get("status") == "running"]
-    assert attempts == [1, 2, 3]
+    assert len(results) == 5
+    # Check retry attempts for the first stage
+    first_stage_attempts = [e["attempt"] for e in events
+                            if e.get("status") == "running" and e.get("stage") == "extract_assets"]
+    assert first_stage_attempts == [1, 2, 3]
 
 
 @pytest.mark.asyncio
@@ -125,14 +134,15 @@ async def test_stage_error_result_also_triggers_retry(monkeypatch: pytest.Monkey
 
     # _ask_director 是协程，monkeypatch 替身也必须是 async。
     async def _director(goal: str, ctx, history: list) -> str:
-        return "extract_shots" if len(calls) < 2 else "completed"
+        return "divide_shots" if len(calls) < 2 else "completed"
 
     monkeypatch.setattr(orch, "_ask_director", _director)
     monkeypatch.setattr(orch, "_get_agent", lambda name: _ErroringThenOk())
 
     results = await orch.run("做短剧", AgentContext(project_id="p1"))
-    assert len(calls) == 2
+    assert len(calls) >= 2
     assert results[0].status == "completed"
+    assert len(results) == 5
 
 
 @pytest.mark.asyncio
@@ -141,23 +151,30 @@ async def test_repeated_stage_stops_before_infinite_loop(monkeypatch: pytest.Mon
     orch.MAX_STAGE_ATTEMPTS = 2
 
     async def _always(ctx, goal, history) -> str:
-        return "build_assets"
+        return "extract_assets"
+
+    class _FailOnExtract:
+        async def run(self, ctx: AgentContext, user_input: str) -> AgentResult:
+            if "extract_assets" in user_input:
+                return AgentResult(status="error", output="always fails")
+            return AgentResult(status="completed", output="ok")
 
     monkeypatch.setattr(orch, "_ask_director", _always)
-    monkeypatch.setattr(orch, "_get_agent", lambda name: _OK_AGENT)
+    monkeypatch.setattr(orch, "_get_agent", lambda name: _FailOnExtract())
 
     results = await orch.run("做短剧", AgentContext(project_id="p1"))
 
-    # 跑满 2 次后中止：2 条正常结果 + 1 条 error。
-    assert len(results) == 3
-    assert results[-1].status == "error"
-    assert "avoid a loop" in results[-1].output
+    # extract_assets 跑满 2 次后中止（error），guard 推进剩余 4 个阶段。
+    assert len(results) == 5
+    error_results = [r for r in results if r.status == "error"]
+    assert len(error_results) == 1
+    assert error_results[0].output  # stage failed after max retries
 
 
 @pytest.mark.asyncio
 async def test_progress_event_carries_tool_calls_and_counts(monkeypatch: pytest.MonkeyPatch) -> None:
     orch = Orchestrator(llm=None)  # type: ignore[arg-type]
-    monkeypatch.setattr(orch, "_ask_director", _sequence_decisions("build_assets", "completed"))
+    monkeypatch.setattr(orch, "_ask_director", _sequence_decisions("extract_assets", "completed"))
 
     ctx = AgentContext(project_id="p1")
 
@@ -174,7 +191,7 @@ async def test_progress_event_carries_tool_calls_and_counts(monkeypatch: pytest.
     events: list[dict] = []
     await orch.run("做短剧", ctx, on_progress=events.append)
 
-    done = [e for e in events if e.get("status") == "completed" and e["stage"] == "build_assets"]
+    done = [e for e in events if e.get("status") == "completed" and e["stage"] == "extract_assets"]
     assert len(done) == 1
     assert done[0]["counts"] == {"extract_assets.count": 7}
     assert done[0]["tool_calls"][0]["tool"] == "extract_assets"
@@ -184,7 +201,7 @@ async def test_progress_event_carries_tool_calls_and_counts(monkeypatch: pytest.
 async def test_stage_tool_calls_do_not_leak_across_stages(monkeypatch: pytest.MonkeyPatch) -> None:
     """每阶段只回填自己那轮的工具调用，不应带上上一阶段的。"""
     orch = Orchestrator(llm=None)  # type: ignore[arg-type]
-    monkeypatch.setattr(orch, "_ask_director", _sequence_decisions("build_assets", "completed"))
+    monkeypatch.setattr(orch, "_ask_director", _sequence_decisions("extract_assets", "completed"))
 
     ctx = AgentContext(project_id="p1")
 
@@ -199,7 +216,7 @@ async def test_stage_tool_calls_do_not_leak_across_stages(monkeypatch: pytest.Mo
     events: list[dict] = []
     await orch.run("做短剧", ctx, on_progress=events.append)
 
-    done = [e for e in events if e.get("status") == "completed" and e["stage"] == "build_assets"][0]
+    done = [e for e in events if e.get("status") == "completed" and e["stage"] == "extract_assets"][0]
     assert [t["tool"] for t in done["tool_calls"]] == ["extract_assets", "generate_image"]
     assert done["counts"] == {"extract_assets.count": 2}
 

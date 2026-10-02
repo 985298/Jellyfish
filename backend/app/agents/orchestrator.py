@@ -33,17 +33,17 @@ ProgressCallback = Callable[[dict], None]
 
 # Director 的 next_action -> 执行该阶段的 specialist 名
 _ACTION_TO_AGENT: dict[str, str] = {
-    "build_assets": "character_designer",
-    "extract_shots": "storyboard",
-    "bind_assets": "storyboard",
-    "generate_frames": "production",
+    "extract_assets": "character_designer",
+    "generate_asset_refs": "character_designer",
+    "divide_shots": "storyboard",
+    "generate_keyframes": "production",
     "generate_videos": "production",
 }
 
 _VALID_ACTIONS = set(_ACTION_TO_AGENT) | {"completed"}
 
 # 阶段顺序（用于跳过已完成阶段）
-_STAGE_ORDER = ["build_assets", "extract_shots", "bind_assets", "generate_frames", "generate_videos"]
+_STAGE_ORDER = ["extract_assets", "generate_asset_refs", "divide_shots", "generate_keyframes", "generate_videos"]
 
 
 def _next_uncompleted_stage(completed: set[str]) -> str | None:

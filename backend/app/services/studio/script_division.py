@@ -9,7 +9,19 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
-from app.models.studio import CameraAngle, CameraMovement, CameraShotType, Chapter, Shot, ShotDetail, VFXType
+from app.models.studio import (
+    CameraAngle,
+    CameraMovement,
+    CameraShotType,
+    Chapter,
+    Character,
+    CharacterImage,
+    Scene,
+    SceneImage,
+    Shot,
+    ShotDetail,
+    VFXType,
+)
 from app.schemas.skills.script_processing import ScriptDivisionResult
 from app.services.common import entity_not_found, require_entity
 
@@ -35,6 +47,7 @@ def _append_division_rows(
         db_add(
             ShotDetail(
                 id=shot_id,
+                description=shot_division.description,
                 camera_shot=getattr(shot_division, 'camera_shot', None) and CameraShotType(getattr(shot_division, 'camera_shot', '').lower()) or CameraShotType.ms,
                 angle=getattr(shot_division, 'angle', None) and CameraAngle(getattr(shot_division, 'angle', '').lower()) or CameraAngle.eye_level,
                 movement=getattr(shot_division, 'movement', None) and CameraMovement(getattr(shot_division, 'movement', '').lower()) or CameraMovement.static,
@@ -92,3 +105,100 @@ def write_division_result_to_chapter_sync(
 
     _append_division_rows(db.add, chapter_id=chapter_id, result=result)
     db.flush()
+
+
+
+
+async def build_asset_list_text(db: AsyncSession, project_id: str) -> str:
+    """Query characters and scenes for a project, format as asset list text."""
+    lines = []
+    img_num = 1
+
+    # Query characters with their reference images
+    chars = (await db.execute(
+        select(Character).where(Character.project_id == project_id).order_by(Character.created_at)
+    )).scalars().all()
+
+    char_parts = []
+    for char in chars:
+        desc = (char.description or "")[:60]
+        # Check if character has a reference image
+        img = (await db.execute(
+            select(CharacterImage.file_id).where(
+                CharacterImage.character_id == char.id,
+                CharacterImage.file_id.isnot(None),
+            ).limit(1)
+        )).first()
+        has_img = "has_ref" if img else "no_ref"
+        char_parts.append("%s(@图片%d, %s, %s)" % (char.name, img_num, desc, has_img))
+        img_num += 1
+    if char_parts:
+        lines.append("角色：" + "、".join(char_parts))
+
+    # Query scenes
+    scenes = (await db.execute(
+        select(Scene).where(Scene.project_id == project_id).order_by(Scene.created_at)
+    )).scalars().all()
+
+    scene_parts = []
+    for scene in scenes:
+        desc = (scene.description or "")[:60]
+        img = (await db.execute(
+            select(SceneImage.file_id).where(
+                SceneImage.scene_id == scene.id,
+                SceneImage.file_id.isnot(None),
+            ).limit(1)
+        )).first()
+        has_img = "has_ref" if img else "no_ref"
+        scene_parts.append("%s(@图片%d, %s, %s)" % (scene.name, img_num, desc, has_img))
+        img_num += 1
+    if scene_parts:
+        lines.append("场景：" + "、".join(scene_parts))
+
+    return "\n".join(lines) if lines else ""
+
+
+def build_asset_list_text_sync(db, project_id: str) -> str:
+    """Sync version of build_asset_list_text."""
+    lines = []
+    img_num = 1
+
+    chars = db.execute(
+        select(Character).where(Character.project_id == project_id).order_by(Character.created_at)
+    ).scalars().all()
+
+    char_parts = []
+    for char in chars:
+        desc = (char.description or "")[:60]
+        img = db.execute(
+            select(CharacterImage.file_id).where(
+                CharacterImage.character_id == char.id,
+                CharacterImage.file_id.isnot(None),
+            ).limit(1)
+        ).first()
+        has_img = "has_ref" if img else "no_ref"
+        char_parts.append("%s(@图片%d, %s, %s)" % (char.name, img_num, desc, has_img))
+        img_num += 1
+    if char_parts:
+        lines.append("角色：" + "、".join(char_parts))
+
+    scenes = db.execute(
+        select(Scene).where(Scene.project_id == project_id).order_by(Scene.created_at)
+    ).scalars().all()
+
+    scene_parts = []
+    for scene in scenes:
+        desc = (scene.description or "")[:60]
+        img = db.execute(
+            select(SceneImage.file_id).where(
+                SceneImage.scene_id == scene.id,
+                SceneImage.file_id.isnot(None),
+            ).limit(1)
+        ).first()
+        has_img = "has_ref" if img else "no_ref"
+        scene_parts.append("%s(@图片%d, %s, %s)" % (scene.name, img_num, desc, has_img))
+        img_num += 1
+    if scene_parts:
+        lines.append("场景：" + "、".join(scene_parts))
+
+    return "\n".join(lines) if lines else ""

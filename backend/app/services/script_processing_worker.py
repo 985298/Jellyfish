@@ -63,7 +63,14 @@ class DivideResultGenerator(AbstractLLMResultGenerator):
 
     def generate_with_llm(self, llm, run_args: dict[str, Any]) -> ScriptDivisionResult:
         agent = ScriptDividerAgent(llm)
-        return agent.divide_script(script_text=str(run_args.get("script_text") or ""))
+        project_id = str(run_args.get("project_id") or "")
+        asset_list = ""
+        if project_id:
+            from app.core.db_sync import sync_session_maker
+            from app.services.studio.script_division import build_asset_list_text_sync
+            with sync_session_maker() as _db:
+                asset_list = build_asset_list_text_sync(_db, project_id)
+        return agent.divide_script(script_text=str(run_args.get("script_text") or ""), asset_list=asset_list)
 
 
 class ConsistencyResultGenerator(AbstractLLMResultGenerator):
@@ -589,10 +596,15 @@ def generate_division_result(
     *,
     db: Session,
     script_text: str,
+    project_id: str = "",
 ) -> ScriptDivisionResult:
     llm = build_default_text_llm_sync(db, thinking=False)
     agent = ScriptDividerAgent(llm)
-    return agent.divide_script(script_text=script_text)
+    asset_list = ""
+    if project_id:
+        from app.services.studio.script_division import build_asset_list_text_sync
+        asset_list = build_asset_list_text_sync(db, project_id)
+    return agent.divide_script(script_text=script_text, asset_list=asset_list)
 
 
 def apply_division_result(

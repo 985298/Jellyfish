@@ -35,3 +35,13 @@ front/_vite_log.txt
 .venv_check/
 backend/jellyfish.db-shm
 backend/jellyfish.db-wal
+
+data/generated-videos/
+data/files/
+backend/video_list.txt
+backend/retry_2.py
+backend/run_final.py
+backend/run_final_batch.py
+backend/batch_enqueue.py
+backend/chaoge_compare.py
+backend/chaoge_full.py

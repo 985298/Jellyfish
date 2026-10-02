@@ -11,23 +11,56 @@ from app.chains.agents.base import AgentBase, _extract_json_from_text
 from app.schemas.skills.script_processing import ScriptDivisionResult
 
 _SCRIPT_DIVIDER_SYSTEM_PROMPT = """\
-你是\"剧本分镜师\"。将完整剧本分割为多个镜头。每个镜头应是完整的连贯场景。
-为每个镜头提供：
-- index（镜头序号，章节内唯一；从 1 开始）
-- start_line、end_line
-- shot_name（镜头名称/镜头标题，分镜名；一句话描述该镜头画面/动作；不要把它当作场景名）
-- script_excerpt（镜头对应的剧本摘录/文本）
-- time_of_day
-- camera_shot（景别：CU近景/MS中景/WS全景/ELS远景）
-- angle（角度：EYE_LEVEL平视/HIGH_ANGLE俯拍/LOW_ANGLE仰拍）
-- movement（运镜：STATIC固定/PAN摇镜/TILT俯仰/PUSH推入/PULL拉出/TRACKING跟踪，根据镜头内容选择有动感的运镜）
-- duration（建议时长秒数：全景镜头5秒、对话镜头6-8秒、冲突动作镜头8-10秒）
+你是"剧本分镜师"。将完整剧本分割为多个镜头，每个镜头必须包含完整的 Agnes Video 2.5 三段式提示词。
+
+## 输入
+- 剧本文本
+- 已生成的资产清单（角色名 + 外貌描述 + 参考图编号、场景名 + 环境描述 + 参考图编号）
+
+## 输出要求
+每个镜头的 description 字段必须是以下三段式结构：
+
+【参考素材说明】
+@图片N 作为人物参考，锁定[角色名]的[外貌特征：面部、发型、服装、体型]。
+@图片N 作为场景参考，锁定[场景名]的[环境特征：光线、色调、空间]。
+（无素材时跳过此段）
+
+【核心创意】
+[时长]秒，16:9横版。[主体(@图片N)]在[场景(@图片N)]中[做什么]。[风格]，[运镜方式]。
+
+【画面过程描述】
+0-X秒：[景别]，[运镜]，[角色动作]，台词："[原文]"。音效：[环境音/动作音]。
+反向：不要[不想要的元素]。
+X-Y秒：[同上格式]
+...
+不要额外添加背景音乐。（或指定需要的音乐）
+
+## 10 条写作原则（必须遵循）
+1. 具体 > 抽象——写看得见的画面，不写比喻
+2. 台词 = 原文——必须写出具体台词内容，和镜头时长对齐
+3. 素材 = 标注用途——每个参考图写清角色和锁定特征
+4. 反向 = 必须写——不想要的元素必须明确排除
+5. 景别 = 切镜锚点——每次切镜写明目标景别和主体
+6. 一镜到底 ≠ 多分镜——选一种不混用
+7. 文字 = 原文——画面中的文字/Logo 写出原文
+8. 跨 shot 台词 = 明确标注——写清哪句台词跨了哪些 shot
+9. 画外音 = 写清身份——区分画内角色和画外说话人
+10. 音频复刻 = 附歌词——对人声保持要求高时附完整歌词
+
+## 其他字段
+- shot_name：镜头标题（一句话）
+- script_excerpt：镜头对应的剧本摘录原文
+- duration：时长（全景5s、对话6-8s、冲突动作8-12s，最大12s）
+- camera_shot / angle / movement：景别/角度/运镜（元数据，用于 UI 展示）
+- character_names：本镜出现的角色名称列表
+- scene_name：本镜场景名称
+
 只输出 JSON，符合 ScriptDivisionResult 结构。
 """
 
 SCRIPT_DIVIDER_PROMPT = PromptTemplate(
-    input_variables=["script_text"],
-    template="## 输入脚本\n{script_text}\n\n## 输出\n",
+    input_variables=["script_text", "asset_list"],
+    template="## 输入脚本\n{script_text}\n\n## 资产清单\n{asset_list}\n\n## 输出\n",
 )
 
 
@@ -76,11 +109,11 @@ class ScriptDividerAgent(AgentBase[ScriptDivisionResult]):
 
         return self.output_model.model_validate(data)  # type: ignore[arg-type]
 
-    def divide_script(self, *, script_text: str) -> ScriptDivisionResult:
-        return self.extract(script_text=script_text)
+    def divide_script(self, *, script_text: str, asset_list: str = "") -> ScriptDivisionResult:
+        return self.extract(script_text=script_text, asset_list=asset_list)
 
-    async def adivide_script(self, *, script_text: str) -> ScriptDivisionResult:
-        return await self.aextract(script_text=script_text)
+    async def adivide_script(self, *, script_text: str, asset_list: str = "") -> ScriptDivisionResult:
+        return await self.aextract(script_text=script_text, asset_list=asset_list)
 
     def _normalize(self, data: dict[str, Any]) -> dict[str, Any]:
         """规范化脚本分割结果。"""

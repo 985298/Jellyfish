@@ -26,10 +26,14 @@ class ShotDivision(BaseModel):
 
     shot_name: str = Field("", description="镜头名称（分镜名/镜头标题）")
     time_of_day: Optional[str] = Field(None, description="时间（日/夜/未知等，可选）")
-    duration: int = Field(default=6, ge=3, le=15, description="建议时长（秒）：全景5s、对话6-8s、冲突动作8-10s")
+    duration: int = Field(default=6, ge=3, le=12, description="建议时长（秒）：全景5s、对话6-8s、冲突动作8-12s，API上限12s")
     camera_shot: str = Field(default="MS", description="景别：CU近景/MS中景/WS全景/ELS远景")
     angle: str = Field(default="EYE_LEVEL", description="角度：EYE_LEVEL平视/HIGH_ANGLE俯拍/LOW_ANGLE仰拍/DUTCH荷兰角")
     movement: str = Field(default="STATIC", description="运镜：STATIC固定/PAN摇镜/TILT俯仰/PUSH推入/PULL拉出/TRACKING跟踪")
+
+    description: str = Field("", description="Agnes 三段式完整提示词：参考素材说明 + 核心创意 + 画面过程描述")
+    character_names: list[str] = Field(default_factory=list, description="本镜出现的角色名称列表")
+    scene_name: Optional[str] = Field(None, description="本镜场景名称")
 
     @field_validator("time_of_day", mode="before")
     @classmethod

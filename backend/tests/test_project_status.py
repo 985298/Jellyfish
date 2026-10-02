@@ -110,7 +110,7 @@ async def test_shot_stats_reports_frame_and_video_gaps(db: AsyncSession) -> None
 
 def test_recommend_next_step_walks_pipeline() -> None:
     def assets(total: int, pending: int) -> dict:
-        return {"total": total, "pending": pending}
+        return {"total": total, "pending": pending, "has_refs": total > 0 and pending == 0}
 
     def shots(total: int, detail: int, frame: int, video: int) -> dict:
         return {
@@ -120,11 +120,11 @@ def test_recommend_next_step_walks_pipeline() -> None:
             "with_video": video,
         }
 
-    assert recommend_next_step(assets(0, 0), shots(0, 0, 0, 0))["stage"] == "build_assets"
-    assert recommend_next_step(assets(2, 1), shots(1, 1, 1, 1))["stage"] == "build_assets"
-    assert recommend_next_step(assets(2, 0), shots(0, 0, 0, 0))["stage"] == "extract_shots"
-    assert recommend_next_step(assets(2, 0), shots(2, 1, 0, 0))["stage"] == "bind_assets"
-    assert recommend_next_step(assets(2, 0), shots(2, 2, 1, 0))["stage"] == "generate_frames"
+    assert recommend_next_step(assets(0, 0), shots(0, 0, 0, 0))["stage"] == "extract_assets"
+    assert recommend_next_step(assets(2, 1), shots(1, 1, 1, 1))["stage"] == "extract_assets"
+    assert recommend_next_step(assets(2, 0), shots(0, 0, 0, 0))["stage"] == "divide_shots"
+    assert recommend_next_step(assets(2, 0), shots(2, 1, 0, 0))["stage"] == "divide_shots"
+    assert recommend_next_step(assets(2, 0), shots(2, 2, 1, 0))["stage"] == "generate_keyframes"
     assert recommend_next_step(assets(2, 0), shots(2, 2, 2, 1))["stage"] == "generate_videos"
     assert recommend_next_step(assets(2, 0), shots(2, 2, 2, 2))["stage"] == "completed"
 

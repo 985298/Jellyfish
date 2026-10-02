@@ -153,7 +153,14 @@ async def divide_script(
     """
     try:
         agent = ScriptDividerAgent(llm)
-        result = agent.divide_script(script_text=request.script_text)
+        asset_list = ""
+        if request.chapter_id:
+            from app.models.studio_projects import Chapter as _Chapter
+            _chapter = await db.get(_Chapter, request.chapter_id)
+            if _chapter:
+                from app.services.studio.script_division import build_asset_list_text
+                asset_list = await build_asset_list_text(db, _chapter.project_id)
+        result = agent.divide_script(script_text=request.script_text, asset_list=asset_list)
 
         if request.write_to_db:
             if not request.chapter_id:

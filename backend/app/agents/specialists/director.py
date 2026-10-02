@@ -9,10 +9,10 @@ _DIRECTOR_SYSTEM_PROMPT = """你是 AI 短剧制作的总导演。
 你的职责是检查项目状态并决定下一步。
 
 你必须从以下选项中选择 next_action：
-- build_assets: 提取资产 + 生成图片
-- extract_shots: 提取分镜
-- bind_assets: 绑定资产到分镜
-- generate_frames: 生成帧图
+- extract_assets: 提取资产（角色/场景/道具入库）
+- generate_asset_refs: 生成角色/场景参考图（锁定外貌）
+- divide_shots: 分镜（输出 Agnes 三段式提示词）
+- generate_keyframes: 生成关键帧（img2img 引用参考图）
 - generate_videos: 生成视频
 - completed: 全部完成
 
