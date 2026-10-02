@@ -25,6 +25,14 @@ class CharacterImage(Base, TimestampMixin):
         index=True,
         comment="所属角色 ID",
     )
+    costume_id: Mapped[str | None] = mapped_column(
+        String(64),
+        ForeignKey("costumes.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+        comment="关联服装 ID（多状态角色：标记此图片展示角色穿哪套服装）",
+    )
+
     file_id: Mapped[str] = mapped_column(
         String(64),
         ForeignKey("files.id", ondelete="CASCADE"),

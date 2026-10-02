@@ -138,6 +138,14 @@ class Costume(Base, TimestampMixin):
         index=True,
         comment="所属项目 ID（可空；项目删除时资产保留但标记为游离）",
     )
+    character_id: Mapped[str | None] = mapped_column(
+        String(64),
+        ForeignKey("characters.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+        comment="关联角色 ID（多状态角色：标记此服装归属哪个角色）",
+    )
+
     prompt_template_id: Mapped[str | None] = mapped_column(
         String(64),
         ForeignKey("prompt_templates.id", ondelete="SET NULL"),
@@ -159,7 +167,7 @@ class Costume(Base, TimestampMixin):
         passive_deletes=True,
         order_by="CostumeImage.id",
     )
-    characters: Mapped[list["Character"]] = relationship(back_populates="costume")
+    characters: Mapped[list["Character"]] = relationship(back_populates="costume", foreign_keys="Character.costume_id")
 
     __table_args__ = (
         Index("ix_costumes_name", "name"),
@@ -264,7 +272,7 @@ class Character(Base, TimestampMixin):
 
     project: Mapped["Project"] = relationship(back_populates="characters")
     actor: Mapped["Actor"] = relationship(back_populates="characters")
-    costume: Mapped["Costume | None"] = relationship(back_populates="characters")
+    costume: Mapped["Costume | None"] = relationship(back_populates="characters", foreign_keys="Character.costume_id")
     prop_links: Mapped[list["CharacterPropLink"]] = relationship(
         back_populates="character",
         cascade="all, delete-orphan",
