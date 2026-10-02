@@ -190,3 +190,32 @@ async def get_keyframe_url(db, shot_id):
         if file_item and file_item.storage_key:
             return file_item.storage_key
     return None
+
+
+
+async def check_frame_complete(db, shot_id):
+    """Check if shot keyframe is fully generated."""
+    frame = (await db.execute(
+        select(ShotFrameImage.file_id).where(
+            ShotFrameImage.shot_detail_id == shot_id,
+            ShotFrameImage.frame_type == "first",
+            ShotFrameImage.file_id.isnot(None),
+        ).limit(1)
+    )).first()
+    return frame is not None
+
+
+async def retry_with_backoff(func, *args, max_retries=3, base_delay=10, **kwargs):
+    """Compensation queue: retry with exponential backoff."""
+    import logging
+    logger = logging.getLogger(__name__)
+    for attempt in range(max_retries):
+        try:
+            return await func(*args, **kwargs)
+        except Exception as e:
+            if attempt == max_retries - 1:
+                raise
+            delay = base_delay * (2 ** attempt)
+            logger.warning("Retry %d/%d after %ds: %s", attempt + 1, max_retries, delay, str(e)[:100])
+            await asyncio.sleep(delay)
+    raise RuntimeError("All retries exhausted")

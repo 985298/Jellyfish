@@ -133,7 +133,7 @@ async def build_asset_list_text(db: AsyncSession, project_id: str) -> str:
         char_parts.append("%s(@图片%d, %s, %s)" % (char.name, img_num, desc, has_img))
         img_num += 1
     if char_parts:
-        lines.append("角色：" + "、".join(char_parts))
+        lines.append("角色（分镜时必须使用以上名称）：" + "、".join(char_parts))
 
     # Query scenes
     scenes = (await db.execute(
@@ -153,7 +153,7 @@ async def build_asset_list_text(db: AsyncSession, project_id: str) -> str:
         scene_parts.append("%s(@图片%d, %s, %s)" % (scene.name, img_num, desc, has_img))
         img_num += 1
     if scene_parts:
-        lines.append("场景：" + "、".join(scene_parts))
+        lines.append("场景（分镜时必须使用以上名称）：" + "、".join(scene_parts))
 
     return "\n".join(lines) if lines else ""
 
@@ -180,7 +180,7 @@ def build_asset_list_text_sync(db, project_id: str) -> str:
         char_parts.append("%s(@图片%d, %s, %s)" % (char.name, img_num, desc, has_img))
         img_num += 1
     if char_parts:
-        lines.append("角色：" + "、".join(char_parts))
+        lines.append("角色（分镜时必须使用以上名称）：" + "、".join(char_parts))
 
     scenes = db.execute(
         select(Scene).where(Scene.project_id == project_id).order_by(Scene.created_at)
@@ -199,6 +199,6 @@ def build_asset_list_text_sync(db, project_id: str) -> str:
         scene_parts.append("%s(@图片%d, %s, %s)" % (scene.name, img_num, desc, has_img))
         img_num += 1
     if scene_parts:
-        lines.append("场景：" + "、".join(scene_parts))
+        lines.append("场景（分镜时必须使用以上名称）：" + "、".join(scene_parts))
 
     return "\n".join(lines) if lines else ""

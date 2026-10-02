@@ -224,6 +224,14 @@ class GenerateVideosBatchTool(Tool):
             for sid in shot_ids:
                 try:
                     kf_url = await get_keyframe_url(db, sid)
+                    # Frame completion check: verify keyframe exists before video generation
+                    if not kf_url:
+                        from app.agents.tools.direct_api import check_frame_complete
+                        frame_ok = await check_frame_complete(db, sid)
+                        if not frame_ok:
+                            results.append({"shot_id": sid, "error": "keyframe not generated yet, skipping video"})
+                            failed += 1
+                            continue
                     detail = await db.get(ShotDetail, sid)
                     prompt = (detail.description if detail and detail.description else "") or ""
                     seconds = detail.duration if detail and detail.duration else 12
