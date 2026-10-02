@@ -202,8 +202,7 @@ async def compose_film(chapter_id: str, bgm_path: str | None = None) -> str:
         await add_bgm(subbed_path, bgm_path, final_path)
     else:
         # No BGM, just rename subbed to final
-        Path(subbed_path).rename(final_path)
-
+        Path(subbed_path).replace(final_path)
     # Cleanup intermediate files
     for p in [concat_path, subbed_path]:
         Path(p).unlink(missing_ok=True)

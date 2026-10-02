@@ -156,7 +156,7 @@ async def direct_image_generate_with_retry(
     )
 
 
-async def direct_video_generate(api_key, base_url, model_name, prompt, image_url, seconds=12, ratio="16:9"):
+async def direct_video_generate(api_key, base_url, model_name, prompt, image_url, seconds=12, ratio="16:9", size="720P"):
     """Call video API directly with image (first_frame reference).
 
     Polls until complete, returns the video content URL. Submission step
@@ -167,11 +167,12 @@ async def direct_video_generate(api_key, base_url, model_name, prompt, image_url
     payload = {
         "model": model_name,
         "prompt": prompt,
-        "image": image_url,
-        "seconds": str(min(seconds, 12)),
-        "ratio": ratio,
         "size": "720P",
+        "aspect_ratio": ratio,
+        "seconds": str(min(seconds, 12)),
     }
+    if image_url:
+        payload["image"] = image_url
     async with httpx.AsyncClient(timeout=30) as client:
         async def _submit():
             resp = await client.post(base_url + "/videos", json=payload, headers=headers)
