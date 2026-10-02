@@ -29,7 +29,10 @@ Rules:
 - Do NOT output any id fields (backend generates them)
 - Character names must preserve exact text: full-width/half-width brackets, spaces, punctuation
 - For group characters (e.g. "guests", "crowd"), create one entry with that exact name
-- description should be concise: appearance, clothing, key traits for characters; location, atmosphere for scenes
+- character description MUST include ALL visual anchors: age, gender, ethnicity, face shape, facial features (eyebrows/eyes/nose/lips), hair color and style, eye color, skin tone, height and body type (shoulders/chest/build), clothing colors and materials and style, accessories (specific items + material + color), distinguishing features (scars/tattoos/birthmarks), temperament keywords
+- scene description MUST include: location type, architectural style, furniture and props, lighting color and intensity, color palette, atmosphere, applicable episode range
+- prop description MUST include: shape, material, color, size, texture, special markings, usage context
+- costume description MUST include: garment type, colors, materials, accessories, style keywords, applicable episode range
 - view_count: default 1
 
 Input:

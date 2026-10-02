@@ -55,13 +55,15 @@ async def get_video_api_config(db: AsyncSession) -> tuple[str, str, str]:
     return provider.api_key, provider.base_url, model.name
 
 
-async def direct_image_generate(api_key, base_url, model_name, prompt, image_url=None, size="1920x1080"):
+async def direct_image_generate(api_key, base_url, model_name, prompt, image_url=None, size="1920x1080", negative_prompt=None):
     """Call image API directly. If image_url provided, use img2img mode.
     Returns the generated image URL."""
     headers = {"Authorization": "Bearer %s" % api_key, "Content-Type": "application/json"}
     payload = {"model": model_name, "prompt": prompt, "n": 1, "size": size}
     if image_url:
         payload["image"] = image_url
+    if negative_prompt:
+        payload["negative_prompt"] = negative_prompt
     async with httpx.AsyncClient(timeout=120) as client:
         for attempt in range(3):
             resp = await client.post(base_url + "/images/generations", json=payload, headers=headers)
