@@ -15,12 +15,19 @@ from app.schemas.skills.script_processing import AssetExtractionResult, ShotBind
 _ASSET_EXTRACTOR_SYSTEM_PROMPT = """\
 You are a script asset extractor. Your task: analyze the full script text and extract ALL unique characters, scenes, props, and costumes as a project-level asset library.
 
+The generated descriptions will be used with prompt templates stored in the database:
+- character_image_front: 4-view turnaround sheet (2048x1152, pure white background)
+- scene_image_front: cinematic establishing shot (1152x2048, no people)
+- prop_image_front: product photography (2048x2048, pure white)
+- costume_image_front: flat lay (2048x2048, pure white)
+Ensure descriptions contain enough visual detail to fill these templates. The {description} variable in each template will be directly replaced by the description text you produce.
+
 Output AssetExtractionResult (JSON only):
 - project_id (required)
 - characters: [{name, description, costume_name?, prop_names[], tags[]}]
 - scenes: [{name, description, tags[], view_count}]
 - props: [{name, description, tags[], view_count}]
-- costumes: [{name, description, tags[], view_count}]
+- costumes: [{name, description, character_name, tags[], view_count}]
 
 Rules:
 - Extract ALL unique entities from the ENTIRE script, not per-scene
@@ -29,10 +36,14 @@ Rules:
 - Do NOT output any id fields (backend generates them)
 - Character names must preserve exact text: full-width/half-width brackets, spaces, punctuation
 - For group characters (e.g. "guests", "crowd"), create one entry with that exact name
-- character description MUST include ALL visual anchors: age, gender, ethnicity, face shape, facial features (eyebrows/eyes/nose/lips), hair color and style, eye color, skin tone, height and body type (shoulders/chest/build), clothing colors and materials and style, accessories (specific items + material + color), distinguishing features (scars/tattoos/birthmarks), temperament keywords
+- Costume names MUST follow format: character name + middle dot (·) + state description. Example: 林宸·前期朴素休闲装. The · separator (U+00B7) is REQUIRED between character name and state description so downstream code can parse costume-to-character mapping automatically.
+- costumes[].character_name: the character this costume belongs to (must match a name in the characters list). If a costume is shared by multiple characters, pick the primary wearer.
+
+Visual anchor requirements (these will be directly injected into the prompt template {description} variable):
+- character description MUST include ALL of: age, gender, ethnicity, face shape, facial features (eyebrows/eyes/nose/lips), hair COLOR (use specific words: black/brown/blonde/gray/auburn) and style, eye COLOR (brown/black/blue/green/hazel), skin TONE (fair/yellow/wheat/dark), height and body TYPE (slim/muscular/stocky/chubby — specify shoulders/chest/build), clothing COLORS and MATERIALS (use specific color words + fabric names, e.g. "navy blue cotton shirt" not just "shirt"), accessories (specific items + material + color), distinguishing features (scars/tattoos/birthmarks), temperament keywords
 - scene description MUST include: location type, architectural style, furniture and props, lighting color and intensity, color palette, atmosphere, applicable episode range
 - prop description MUST include: shape, material, color, size, texture, special markings, usage context
-- costume description MUST include: garment type, colors, materials, accessories, style keywords, applicable episode range
+- costume description MUST include: garment type, colors (specific color words), materials (fabric names), accessories, style keywords, applicable episode range
 - view_count: default 1
 
 Input:

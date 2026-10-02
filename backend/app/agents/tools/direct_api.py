@@ -55,32 +55,114 @@ async def get_video_api_config(db: AsyncSession) -> tuple[str, str, str]:
     return provider.api_key, provider.base_url, model.name
 
 
-async def direct_image_generate(api_key, base_url, model_name, prompt, image_url=None, size="1920x1080", negative_prompt=None):
-    """Call image API directly. If image_url provided, use img2img mode.
-    Returns the generated image URL."""
+class _NonRetryableError(Exception):
+    """Raised for non-retryable HTTP statuses (e.g. 400 bad request).
+
+    ``_retry_with_backoff`` re-raises this immediately without consuming a
+    retry slot, so callers can distinguish "don't bother trying again" from
+    transient failures.
+    """
+
+
+async def _retry_with_backoff(func, max_attempts=5, base_delay=2):
+    """Retry an async function with exponential backoff.
+
+    ``func`` is an awaitable callable taking no arguments. Retries on any
+    ``Exception`` except ``_NonRetryableError`` (raised immediately). Backoff
+    schedule: ``base_delay * 2**attempt`` -> 2s, 4s, 8s, 16s for base=2.
+
+    Returns ``(result, attempts)`` where ``attempts`` is the number of
+    retries consumed (0 means first-try success).
+    """
+    for attempt in range(max_attempts):
+        try:
+            result = await func()
+            return result, attempt
+        except _NonRetryableError:
+            raise
+        except Exception as e:
+            if attempt == max_attempts - 1:
+                raise
+            delay = base_delay * (2 ** attempt)
+            logger.warning(
+                "Retry %d/%d after %ds: %s",
+                attempt + 1, max_attempts, delay, str(e)[:100],
+            )
+            await asyncio.sleep(delay)
+    raise RuntimeError("All retries exhausted")
+
+
+async def _direct_image_generate_core(
+    api_key, base_url, model_name, prompt, image_url=None,
+    size="1920x1080", negative_prompt=None,
+):
+    """Core image generation with exponential backoff.
+
+    Returns ``(image_url, retry_count)``. Retries on 429/500/502/503 with
+    exponential backoff (2s, 4s, 8s, 16s); raises ``_NonRetryableError``
+    immediately on 400 (and other non-2xx non-retryable statuses).
+    """
     headers = {"Authorization": "Bearer %s" % api_key, "Content-Type": "application/json"}
     payload = {"model": model_name, "prompt": prompt, "n": 1, "size": size}
     if image_url:
         payload["image"] = image_url
     if negative_prompt:
         payload["negative_prompt"] = negative_prompt
+
     async with httpx.AsyncClient(timeout=120) as client:
-        for attempt in range(3):
-            resp = await client.post(base_url + "/images/generations", json=payload, headers=headers)
-            if resp.status_code == 429:
-                await asyncio.sleep(60)
-                continue
-            resp.raise_for_status()
+        async def _attempt():
+            resp = await client.post(
+                base_url + "/images/generations", json=payload, headers=headers,
+            )
+            if resp.status_code in (429, 500, 502, 503):
+                raise RuntimeError(
+                    "Retryable status %d: %s" % (resp.status_code, str(resp.text)[:100])
+                )
+            if not (200 <= resp.status_code < 300):
+                raise _NonRetryableError(
+                    "Non-retryable status %d: %s"
+                    % (resp.status_code, str(resp.text)[:200])
+                )
             data = resp.json()
             if "data" in data and len(data["data"]) > 0:
                 return data["data"][0].get("url", "")
             raise RuntimeError("No image URL in response: %s" % str(data)[:200])
-    raise RuntimeError("Image generation failed after 3 attempts")
+
+        return await _retry_with_backoff(_attempt, max_attempts=5, base_delay=2)
+
+
+async def direct_image_generate(
+    api_key, base_url, model_name, prompt, image_url=None,
+    size="1920x1080", negative_prompt=None,
+):
+    """Call image API directly. If ``image_url`` provided, use img2img mode.
+
+    Returns the generated image URL (backward compatible). Use
+    :func:`direct_image_generate_with_retry` to also receive the retry count.
+    """
+    url, _ = await _direct_image_generate_core(
+        api_key, base_url, model_name, prompt, image_url, size, negative_prompt,
+    )
+    return url
+
+
+async def direct_image_generate_with_retry(
+    api_key, base_url, model_name, prompt, image_url=None,
+    size="1920x1080", negative_prompt=None,
+):
+    """Same as :func:`direct_image_generate` but returns ``(image_url, retry_count)``."""
+    return await _direct_image_generate_core(
+        api_key, base_url, model_name, prompt, image_url, size, negative_prompt,
+    )
 
 
 async def direct_video_generate(api_key, base_url, model_name, prompt, image_url, seconds=12, ratio="16:9"):
     """Call video API directly with image (first_frame reference).
-    Polls until complete, returns the video content URL."""
+
+    Polls until complete, returns the video content URL. Submission step
+    retries on 429/500/502/503 with exponential backoff (2s, 4s, 8s, 16s);
+    raises ``_NonRetryableError`` immediately on 400. Polling loop unchanged.
+    """
     headers = {"Authorization": "Bearer %s" % api_key, "Content-Type": "application/json"}
     payload = {
         "model": model_name,
@@ -91,17 +173,23 @@ async def direct_video_generate(api_key, base_url, model_name, prompt, image_url
         "size": "720P",
     }
     async with httpx.AsyncClient(timeout=30) as client:
-        for attempt in range(5):
+        async def _submit():
             resp = await client.post(base_url + "/videos", json=payload, headers=headers)
-            if resp.status_code == 429:
-                await asyncio.sleep(60)
-                continue
-            resp.raise_for_status()
+            if resp.status_code in (429, 500, 502, 503):
+                raise RuntimeError(
+                    "Retryable status %d: %s" % (resp.status_code, str(resp.text)[:100])
+                )
+            if not (200 <= resp.status_code < 300):
+                raise _NonRetryableError(
+                    "Non-retryable status %d: %s"
+                    % (resp.status_code, str(resp.text)[:200])
+                )
             task_id = resp.json().get("id", "")
-            if task_id:
-                break
-        else:
-            raise RuntimeError("Video submission failed after 5 attempts")
+            if not task_id:
+                raise RuntimeError("No task id in submission response")
+            return task_id
+
+        task_id, _ = await _retry_with_backoff(_submit, max_attempts=5, base_delay=2)
         for _ in range(60):
             await asyncio.sleep(10)
             resp = await client.get(base_url + "/videos/" + task_id, headers=headers)
