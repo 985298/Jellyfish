@@ -54,6 +54,7 @@ _STAGE_LABELS: dict[str, str] = {
     "divide_shots": "分镜（Agnes 三段式提示词）",
     "generate_keyframes": "生成关键帧（img2img）",
     "generate_videos": "生成视频",
+    "compose_film": "剪辑成片",
     "completed": "全部完成",
 }
 
@@ -63,6 +64,7 @@ _STAGE_ORDER: tuple[str, ...] = (
     "divide_shots",
     "generate_keyframes",
     "generate_videos",
+    "compose_film",
 )
 
 

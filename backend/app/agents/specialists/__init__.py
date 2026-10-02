@@ -54,6 +54,8 @@ _AGENT_TOOL_NAMES: dict[str, list[str]] = {
         "generate_videos_batch",
         "check_task_status",
         "retry_task",
+        "compose_film",
+        "generate_bgm",
     ],
 }
 
@@ -72,6 +74,7 @@ def _build_tool_registry() -> dict[str, Tool]:
     )
     from app.agents.tools.media_tools import GenerateFrameTool, GenerateVideoTool, GenerateVideosBatchTool
     from app.agents.tools.asset_ref_generator import GenerateAssetRefsTool
+    from app.agents.tools.composition_tools import ComposeFilmTool, GenerateBgmTool
     from app.agents.tools.shot_tools import (
         BindAssetsTool,
         ExtractShotsTool,
@@ -92,6 +95,8 @@ def _build_tool_registry() -> dict[str, Tool]:
         "generate_video": GenerateVideoTool(),
         "generate_videos_batch": GenerateVideosBatchTool(),
         "generate_asset_refs": GenerateAssetRefsTool(),
+        "compose_film": ComposeFilmTool(),
+        "generate_bgm": GenerateBgmTool(),
         "check_task_status": CheckTaskStatusTool(),
         "retry_task": RetryTaskTool(),
     }

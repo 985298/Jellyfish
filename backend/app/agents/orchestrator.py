@@ -38,12 +38,13 @@ _ACTION_TO_AGENT: dict[str, str] = {
     "divide_shots": "storyboard",
     "generate_keyframes": "production",
     "generate_videos": "production",
+    "compose_film": "production",
 }
 
 _VALID_ACTIONS = set(_ACTION_TO_AGENT) | {"completed"}
 
 # 阶段顺序（用于跳过已完成阶段）
-_STAGE_ORDER = ["extract_assets", "generate_asset_refs", "divide_shots", "generate_keyframes", "generate_videos"]
+_STAGE_ORDER = ["extract_assets", "generate_asset_refs", "divide_shots", "generate_keyframes", "generate_videos", "compose_film"]
 
 
 def _next_uncompleted_stage(completed: set[str]) -> str | None:

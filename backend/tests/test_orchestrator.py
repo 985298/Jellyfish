@@ -49,10 +49,10 @@ async def test_director_drives_stage_sequence(monkeypatch: pytest.MonkeyPatch) -
     ctx = AgentContext(project_id="p1")
     results = await orch.run("做短剧", ctx, on_progress=events.append)
 
-    assert len(results) == 5, "五个非 completed 阶段各产出一条结果"
-    assert seen == {"character_designer": 2, "storyboard": 1, "production": 2}
+    assert len(results) == 6, "五个非 completed 阶段各产出一条结果"
+    assert seen == {"character_designer": 2, "storyboard": 1, "production": 3}
     completed_stages = [e["stage"] for e in events if e.get("status") == "completed"]
-    assert completed_stages == ["extract_assets", "generate_videos", "generate_asset_refs", "divide_shots", "generate_keyframes", "completed"]
+    assert completed_stages == ["extract_assets", "generate_videos", "generate_asset_refs", "divide_shots", "generate_keyframes", "compose_film", "completed"]
 
 
 @pytest.mark.asyncio
@@ -81,8 +81,8 @@ async def test_director_failure_falls_back_instead_of_stopping(monkeypatch: pyte
     events: list[dict] = []
     results = await orch.run("做短剧", AgentContext(project_id="p1"), on_progress=events.append)
 
-    assert fallback_calls["n"] == 6
-    assert len(results) == 5
+    assert fallback_calls["n"] == 7
+    assert len(results) == 6
     assert all(r.status == "completed" for r in results)
     assert any(e.get("status") == "fallback" for e in events)
 
@@ -112,7 +112,7 @@ async def test_failing_stage_is_retried_until_success(monkeypatch: pytest.Monkey
     # extract_assets retries: call 1 (fail), call 2 (fail), call 3 (succeed)
     assert len(calls) >= 3, "extract_assets should retry at least 3 times"
     assert results[0].status == "completed"
-    assert len(results) == 5
+    assert len(results) == 6
     # Check retry attempts for the first stage
     first_stage_attempts = [e["attempt"] for e in events
                             if e.get("status") == "running" and e.get("stage") == "extract_assets"]
@@ -142,7 +142,7 @@ async def test_stage_error_result_also_triggers_retry(monkeypatch: pytest.Monkey
     results = await orch.run("做短剧", AgentContext(project_id="p1"))
     assert len(calls) >= 2
     assert results[0].status == "completed"
-    assert len(results) == 5
+    assert len(results) == 6
 
 
 @pytest.mark.asyncio
@@ -165,7 +165,7 @@ async def test_repeated_stage_stops_before_infinite_loop(monkeypatch: pytest.Mon
     results = await orch.run("做短剧", AgentContext(project_id="p1"))
 
     # extract_assets 跑满 2 次后中止（error），guard 推进剩余 4 个阶段。
-    assert len(results) == 5
+    assert len(results) == 6
     error_results = [r for r in results if r.status == "error"]
     assert len(error_results) == 1
     assert error_results[0].output  # stage failed after max retries

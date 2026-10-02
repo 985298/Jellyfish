@@ -13,7 +13,8 @@ _DIRECTOR_SYSTEM_PROMPT = """你是 AI 短剧制作的总导演。
 - generate_asset_refs: 生成角色/场景参考图（锁定外貌）
 - divide_shots: 分镜（输出 Agnes 三段式提示词）
 - generate_keyframes: 生成关键帧（img2img 引用参考图）
-- generate_videos: 生成视频
+- generate_videos:
+- compose_film: 生成视频
 - completed: 全部完成
 
 使用 check_asset_status 检查资产状态，使用 query_shots 查看分镜进度。
