@@ -183,9 +183,9 @@ async def compose_film(chapter_id: str, bgm_path: str | None = None) -> str:
         raise RuntimeError("No videos found for chapter %s" % chapter_id)
 
     video_paths = [s["video_path"] for s in shots]
-    concat_path = str(OUTPUT_DIR / "%s_concat.mp4" % chapter_id)
-    ass_path = str(OUTPUT_DIR / "%s_subtitles.ass" % chapter_id)
-    final_path = str(OUTPUT_DIR / "%s_final.mp4" % chapter_id)
+    concat_path = str(OUTPUT_DIR / ("%s_concat.mp4" % chapter_id))
+    ass_path = str(OUTPUT_DIR / ("%s_subtitles.ass" % chapter_id))
+    final_path = str(OUTPUT_DIR / ("%s_final.mp4" % chapter_id))
 
     # Step 1: Concatenate
     await concatenate_videos(video_paths, concat_path)
@@ -194,7 +194,7 @@ async def compose_film(chapter_id: str, bgm_path: str | None = None) -> str:
     generate_ass_subtitles(shots, ass_path)
 
     # Step 3: Burn subtitles
-    subbed_path = str(OUTPUT_DIR / "%s_subbed.mp4" % chapter_id)
+    subbed_path = str(OUTPUT_DIR / ("%s_subbed.mp4" % chapter_id))
     await burn_subtitles(concat_path, ass_path, subbed_path)
 
     # Step 4: Add BGM (if provided)
