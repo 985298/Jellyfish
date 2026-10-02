@@ -55,7 +55,7 @@ class Scene(Base, TimestampMixin):
 
     __table_args__ = (
         Index("ix_scenes_name", "name"),
-        UniqueConstraint("name", name="uq_scenes_name"),
+        UniqueConstraint("project_id", "name", name="uq_scenes_project_name"),
     )
 
 
@@ -111,7 +111,7 @@ class Prop(Base, TimestampMixin):
 
     __table_args__ = (
         Index("ix_props_name", "name"),
-        UniqueConstraint("name", name="uq_props_name"),
+        UniqueConstraint("project_id", "name", name="uq_props_project_name"),
     )
 
 
@@ -163,7 +163,7 @@ class Costume(Base, TimestampMixin):
 
     __table_args__ = (
         Index("ix_costumes_name", "name"),
-        UniqueConstraint("name", name="uq_costumes_name"),
+        UniqueConstraint("project_id", "name", name="uq_costumes_project_name"),
     )
 
 

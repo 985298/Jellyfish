@@ -154,7 +154,7 @@ class ProjectActorLink(Base, TimestampMixin):
     actor: Mapped["Actor"] = relationship()
 
     __table_args__ = (
-        UniqueConstraint("actor_id", "project_id", "chapter_id", "shot_id", name="uq_project_actor_links_actor_scope"),
+        UniqueConstraint("actor_id", "project_id", name="uq_project_actor_links_actor_project"),
     )
 
 
