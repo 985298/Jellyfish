@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-from app.agents.tools import asset_ref_generator as argen
+from app.services.studio import asset_orchestrator as argen
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -243,3 +243,5 @@ class TestResolutionConstants:
 
 # ---------------------------------------------------------------------------
 # 6. Code-DB consistency (bonus: DB content matches code constants)
+
+
