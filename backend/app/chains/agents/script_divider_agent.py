@@ -47,6 +47,13 @@ X-Y秒：[同上格式]
 9. 画外音 = 写清身份——区分画内角色和画外说话人
 10. 音频复刻 = 附歌词——对人声保持要求高时附完整歌词
 
+## JSON 转义要求（关键！）
+description 字段中包含大量文本，必须正确转义：
+- 换行用 \\n（不要直接换行）
+- 台词用中文引号「」或''（不要用英文双引号"）
+- 所有双引号 " 必须写成 \\"
+- 反斜线 \\ 必须写成 \\\\
+
 ## 其他字段
 - shot_name：镜头标题（一句话）
 - script_excerpt：镜头对应的剧本摘录原文
@@ -91,7 +98,16 @@ class ScriptDividerAgent(AgentBase[ScriptDivisionResult]):
         """
 
         json_str = _extract_json_from_text(raw)
-        data: Any = json.loads(json_str)
+        try:
+            data: Any = json.loads(json_str)
+        except json.JSONDecodeError:
+            # LLM 可能输出未转义的控制字符（换行/引号），strict=False 允许
+            try:
+                data = json.loads(json_str, strict=False)
+            except json.JSONDecodeError:
+                # 最后尝试：移除 markdown 代码块后重试
+                cleaned = json_str.replace("```json", "").replace("```", "").strip()
+                data = json.loads(cleaned, strict=False)
 
         if isinstance(data, list):
             data = {"shots": data}
