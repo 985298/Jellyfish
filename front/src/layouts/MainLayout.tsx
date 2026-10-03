@@ -20,6 +20,25 @@ import { StudioProjectsService, StudioChaptersService, StudioEntitiesService } f
 
 const { Header, Sider, Content } = Layout
 
+// U15：面包屑章节段标签——异步查章节 index，显示"第 N 章"
+function ChapterBreadcrumbLabel({ chapterId }: { chapterId: string }) {
+  const [label, setLabel] = useState<string>('章节')
+  useEffect(() => {
+    let cancelled = false
+    void StudioChaptersService.getChapterApiV1StudioChaptersChapterIdGet({ chapterId })
+      .then((res) => {
+        if (cancelled) return
+        const ch = res.data
+        if (ch && typeof ch.index === 'number') {
+          setLabel(`第${ch.index}章`)
+        }
+      })
+      .catch(() => { /* 回退到"章节" */ })
+    return () => { cancelled = true }
+  }, [chapterId])
+  return <>{label}</>
+}
+
 const MainLayout: React.FC = () => {
   const { t, i18n } = useTranslation('layout')
   const location = useLocation()
@@ -63,8 +82,17 @@ const MainLayout: React.FC = () => {
       edit: '编辑',
     }
     path.forEach((segment, i) => {
-      // 特殊：/projects/:projectId/chapters/:chapterId/* 中的 chapterId 段不展示（避免出现“章节”这一层）
+      // U15：chapterId 段映射为"第 N 章"（查章节 index），不再省略
       if (path[0] === 'projects' && path[2] === 'chapters' && i === 3) {
+        const projectId = path[1]
+        const chapterId = path[3]
+        const href = `/projects/${projectId}/chapters/${chapterId}/shots`
+        const isLast = i === path.length - 1
+        // 章节序号异步解析失败时回退到"章节"，避免阻塞面包屑渲染
+        items.push({
+          key: href,
+          title: isLast ? <ChapterBreadcrumbLabel chapterId={chapterId} /> : <Link to={href}><ChapterBreadcrumbLabel chapterId={chapterId} /></Link>,
+        })
         return
       }
 
@@ -76,13 +104,9 @@ const MainLayout: React.FC = () => {
       // /projects/:projectId/chapters/:chapterId/*
       if (path[0] === 'projects' && path[2] === 'chapters') {
         const projectId = path[1]
-        const chapterId = path[3]
         if (segment === 'chapters' && i === 2) {
           // “章节管理”实际在项目工作台页
           href = `/projects/${projectId}?tab=chapters`
-        } else if (i === 3) {
-          // 章节 ID 段没有对应独立页面，跳到分镜页（存在路由）
-          href = `/projects/${projectId}/chapters/${chapterId}/shots`
         }
       }
 
@@ -90,7 +114,6 @@ const MainLayout: React.FC = () => {
       let label = pathLabels[segment]
       if (label === undefined) {
         if (path[0] === 'projects' && i === 1) label = '项目工作台'
-        else if (path[2] === 'chapters' && i === 3) label = '章节'
         else label = segment
       }
       items.push({

@@ -21,6 +21,7 @@ export type TaskUiItem = {
   navigateRelationEntityId?: string | null
   onCancel?: (() => void) | null
   onNavigate?: (() => void) | null
+  onRetry?: (() => void) | null
 }
 
 export type TaskPageContext = {
@@ -71,6 +72,7 @@ export function mergeTaskUiItems(
         server?.navigate_relation_entity_id ?? optimistic?.navigateRelationEntityId,
       onCancel: optimistic?.onCancel ?? null,
       onNavigate: optimistic?.onNavigate ?? null,
+      onRetry: optimistic?.onRetry ?? null,
     }
   })
 }

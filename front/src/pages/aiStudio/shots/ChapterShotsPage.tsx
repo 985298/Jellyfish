@@ -444,16 +444,6 @@ export function ChapterShotsPage() {
             {loadingChapter ? '加载中…' : '分镜列表'}
           </Typography.Text>
         </div>
-
-        {shots.length > 0 ? (
-          <Button
-            type="primary"
-            icon={<FileSearchOutlined />}
-            onClick={() => navigate(getChapterStudioPath(projectId, chapterId))}
-          >
-            进入分镜工作室
-          </Button>
-        ) : null}
       </Header>
 
       <Content

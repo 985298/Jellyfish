@@ -41,7 +41,7 @@ type AssetVM = NamedDraft & {
   candidateId?: number
   candidateStatus?: ShotAssetOverviewItem['candidate_status']
 }
-type ShotListFilter = 'all' | 'not_extracted' | 'pending'
+type ShotListFilter = 'all' | 'not_extracted' | 'pending' | 'ready'
 
 type ShotAssetCreatedAndLinkedMessage = {
   type: 'studio-shot-asset-created-and-linked'
@@ -240,6 +240,7 @@ export function ChapterShotEditPage() {
       all: shotsSorted.length,
       not_extracted: shotsSorted.filter((item) => getShotExtractionSummary(item).state === 'not_extracted').length,
       pending: shotsSorted.filter((item) => isPendingExtractionConfirmation(item)).length,
+      ready: shotsSorted.filter((item) => item.status === 'ready').length,
     }),
     [shotsSorted],
   )
@@ -248,13 +249,17 @@ export function ChapterShotEditPage() {
       { label: `全部 ${shotListFilterCounts.all}`, value: 'all' },
       { label: `未提取 ${shotListFilterCounts.not_extracted}`, value: 'not_extracted' },
       { label: `待确认 ${shotListFilterCounts.pending}`, value: 'pending' },
+      { label: `已就绪 ${shotListFilterCounts.ready}`, value: 'ready' },
     ],
-    [shotListFilterCounts.all, shotListFilterCounts.not_extracted, shotListFilterCounts.pending],
+    [shotListFilterCounts.all, shotListFilterCounts.not_extracted, shotListFilterCounts.pending, shotListFilterCounts.ready],
   )
   const filteredShots = useMemo(() => {
     if (shotListFilter === 'all') return shotsSorted
     if (shotListFilter === 'not_extracted') {
       return shotsSorted.filter((item) => getShotExtractionSummary(item).state === 'not_extracted')
+    }
+    if (shotListFilter === 'ready') {
+      return shotsSorted.filter((item) => item.status === 'ready')
     }
     return shotsSorted.filter((item) => isPendingExtractionConfirmation(item))
   }, [shotListFilter, shotsSorted])

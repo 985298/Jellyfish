@@ -4,6 +4,7 @@ import {
   ArrowRightOutlined,
   CloseCircleOutlined,
   PushpinOutlined,
+  ReloadOutlined,
   UnorderedListOutlined,
 } from '@ant-design/icons'
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
@@ -25,7 +26,7 @@ const TASK_CENTER_BUTTON_HEIGHT = 40
 const TASK_CENTER_PANEL_WIDTH = 360
 const TASK_CENTER_PANEL_HEIGHT = 420
 const TASK_CENTER_PANEL_GAP = 12
-const TASK_CENTER_PAGE_SIZE = 3
+const TASK_CENTER_PAGE_SIZE = 5
 
 function getDefaultButtonPosition() {
   if (typeof window === 'undefined') {
@@ -455,6 +456,15 @@ export function TaskCenter() {
                                   }}
                                 >
                                   {task.cancelRequested ? '正在取消' : '取消'}
+                                </Button>
+                              ) : null}
+                              {task.status === 'failed' && task.onRetry ? (
+                                <Button
+                                  size="small"
+                                  icon={<ReloadOutlined />}
+                                  onClick={task.onRetry}
+                                >
+                                  重试
                                 </Button>
                               ) : null}
                             </div>
