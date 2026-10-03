@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Button, Card, Col, Divider, Empty, Layout, List, Modal, Popconfirm, Row, Segmented, Space, Spin, Tooltip, Typography, message } from 'antd'
-import { ArrowLeftOutlined, ClearOutlined, CloseCircleOutlined, ReloadOutlined } from '@ant-design/icons'
+import { ArrowLeftOutlined, ClearOutlined, ReloadOutlined } from '@ant-design/icons'
 import type {
   EntityNameExistenceItem,
   ShotAssetOverviewItem,
@@ -12,7 +12,6 @@ import type {
   ShotExtractedDialogueCandidateRead,
   ShotPreparationStateRead,
   ShotRead,
-  TaskStatus,
 } from '../../../services/generated'
 import {
   StudioChaptersService,
@@ -22,27 +21,17 @@ import {
   StudioShotDialogLinesService,
   StudioShotsService,
 } from '../../../services/generated'
-import { executeAsyncTaskCreate, executeTaskCancel, notifyExistingTask } from '../components/taskActionHelpers'
 import { Link, Navigate, useNavigate, useParams } from 'react-router-dom'
-import { getChapterShotEditPath, getChapterShotsPath, getChapterStudioPath } from '../project/ProjectWorkbench/routes'
+import { getChapterShotsPath, getChapterStudioPath } from '../project/ProjectWorkbench/routes'
 import { DisplayImageCard } from '../assets/components/DisplayImageCard'
 import { ChapterShotAssetConfirmation } from './components/ChapterShotAssetConfirmation'
 import { ChapterShotBasicInfoSection } from './components/ChapterShotBasicInfoSection'
 import { ChapterShotDialogueConfirmation } from './components/ChapterShotDialogueConfirmation'
 import { ChapterShotPreparationGuide } from './components/ChapterShotPreparationGuide'
-import { useRelationTaskNotification } from '../components/taskNotificationHelpers'
-import { useTaskPageContext } from '../components/taskPageContext'
-import { createTaskSettledReloader } from '../components/taskResultHelpers'
-import { TASK_COPY } from '../components/taskCopy'
-import {
-  SCRIPT_EXTRACTION_RELATION_TYPE,
-  useCancelableRelationTask,
-} from '../project/ProjectWorkbench/chapterDivisionTasks'
 import { StudioEntitiesApi } from '../../../services/studioEntities'
 import { resolveAssetUrl, buildFileDownloadUrl } from '../assets/utils'
 
 const { Header, Content } = Layout
-const extractTaskCopy = TASK_COPY.scriptExtract
 
 type AssetKind = 'scene' | 'actor' | 'prop' | 'costume'
 type NamedDraft = { name: string; thumbnail?: string | null; id?: string | null; file_id?: string | null; description?: string | null }
@@ -202,10 +191,7 @@ export function ChapterShotEditPage() {
   const [shotDetail, setShotDetail] = useState<ShotDetailRead | null>(null)
   const [shotAssetsOverview, setShotAssetsOverview] = useState<ShotAssetsOverviewRead | null>(null)
   const preparationStateRequestSeqRef = useRef(0)
-  const [extractingAssets, setExtractingAssets] = useState(false)
-  const [batchExtractingAssets, setBatchExtractingAssets] = useState(false)
   const [skipExtractionUpdating, setSkipExtractionUpdating] = useState(false)
-  const extractInFlightRef = useRef(false)
   const [selectedShotIds, setSelectedShotIds] = useState<string[]>(shotId ? [shotId] : [])
  const pendingExternalAssetCreateRef = useRef(false)
 
@@ -247,10 +233,6 @@ export function ChapterShotEditPage() {
   const shotsSorted = useMemo(
     () => [...shots].sort((a, b) => a.index - b.index),
     [shots],
-  )
-  const selectedShots = useMemo(
-    () => shotsSorted.filter((item) => selectedShotIds.includes(item.id)),
-    [selectedShotIds, shotsSorted],
   )
   const multiSelectActive = selectedShotIds.length > 1
   const shotListFilterCounts = useMemo(
@@ -445,28 +427,6 @@ export function ChapterShotEditPage() {
     },
     [applyPreparationState, shotId],
   )
-
-  const reloadAfterExtractTaskSettled = useCallback(
-    createTaskSettledReloader(loadPage),
-    [loadPage],
-  )
-  const { task: extractTask, settledTask: extractSettledTask, trackTaskData: trackExtractTaskData, applyCancelData: applyExtractCancelData } = useCancelableRelationTask({
-    enabled: !!chapterId,
-    relationType: SCRIPT_EXTRACTION_RELATION_TYPE,
-    relationEntityId: chapterId,
-    onTaskSettled: reloadAfterExtractTaskSettled,
-  })
-  useTaskPageContext(
-    chapterId
-      ? [
-          {
-            relationType: SCRIPT_EXTRACTION_RELATION_TYPE,
-            relationEntityId: chapterId,
-          },
-        ]
-      : [],
-  )
-  const extractTaskActive = !!extractTask
 
   const scheduleSaveDialogLine = useCallback(
     (lineId: number, patch: ShotDialogLineUpdate) => {
@@ -854,197 +814,6 @@ export function ChapterShotEditPage() {
     },
     [applyPreparationState, loadPreparationState, shotId],
   )
-
-  const loadProjectAssetsForBind = useCallback(async (): Promise<{ characters: unknown[]; scenes: unknown[]; props: unknown[]; costumes: unknown[] } | null> => {
-    if (!projectId) return null
-    try {
-      const groups: { characters: unknown[]; scenes: unknown[]; props: unknown[]; costumes: unknown[] } = { characters: [], scenes: [], props: [], costumes: [] }
-      const entityTypes: Array<{ type: string; key: keyof typeof groups }> = [
-        { type: 'character', key: 'characters' },
-        { type: 'scene', key: 'scenes' },
-        { type: 'prop', key: 'props' },
-        { type: 'costume', key: 'costumes' },
-      ]
-      for (const { type, key } of entityTypes) {
-        try {
-          const res = await StudioEntitiesService.listEntitiesApiV1StudioEntitiesEntityTypeGet({ entityType: type, pageSize: 100 })
-          const items = (res.data?.items as unknown[] | undefined) ?? []
-          groups[key] = items.map((item) => {
-            const obj = (item ?? {}) as Record<string, unknown>
-            return { name: obj.name ?? obj.title ?? '', thumbnail: obj.thumbnail ?? null, id: obj.id ?? null, file_id: obj.file_id ?? null }
-          }).filter((item) => String(item.name).length > 0)
-        } catch {
-          groups[key] = []
-        }
-      }
-      const total = groups.characters.length + groups.scenes.length + groups.props.length + groups.costumes.length
-      if (total === 0) return null
-      return groups
-    } catch {
-      return null
-    }
-  }, [projectId])
-
-  const extractAssets = useCallback(async () => {
-    if (!projectId || !chapterId || !shot) return
-    if (extractInFlightRef.current) return
-    if (notifyExistingTask(extractTask, {
-      cancellingMessage: extractTaskCopy.cancellingMessage,
-      runningMessage: extractTaskCopy.runningMessage,
-    })) {
-      return
-    }
-    extractInFlightRef.current = true
-    setExtractingAssets(true)
-    try {
-      message.loading({ content: '加载项目资产库...', key: 'bind', duration: 0 })
-      const assetList = await loadProjectAssetsForBind()
-      if (!assetList) {
-        message.destroy('bind')
-        message.warning('项目还没有资产库。请先在"一键制作"或资产页完成资产提取与生成，再来此页绑定。')
-        return
-      }
-      const scriptDivision = {
-        total_shots: 1,
-        shots: [
-          {
-            index: shot.index,
-            start_line: 1,
-            end_line: 1,
-            script_excerpt: shot.script_excerpt ?? '',
-            shot_name: shot.title ?? '',
-          },
-        ],
-      }
-      message.loading({ content: '提交资产绑定任务...', key: 'bind', duration: 0 })
-      await executeAsyncTaskCreate({
-        request: async () => {
-          const r = await fetch('/api/v1/script-processing/bind-assets-async', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              chapter_id: chapterId,
-              script_division_json: JSON.stringify(scriptDivision),
-              asset_list_json: JSON.stringify(assetList),
-            }),
-          })
-          const json = await r.json()
-          return (json?.data ? { data: json.data } : { data: null }) as { data: { task_id: string; status: TaskStatus; reused?: boolean | null } | null }
-        },
-        trackTaskData: trackExtractTaskData,
-        startedMessage: extractTaskCopy.startedMessage,
-        reusedMessage: extractTaskCopy.reusedMessage,
-        fallbackErrorMessage: '资产绑定失败',
-      })
-      message.destroy('bind')
-    } catch {
-      message.destroy('bind')
-    } finally {
-      setExtractingAssets(false)
-      extractInFlightRef.current = false
-    }
-  }, [chapterId, extractTask, loadProjectAssetsForBind, projectId, shot])
-
-  const batchExtractAssets = useCallback(async () => {
-    if (!projectId || !chapterId || selectedShots.length === 0) return
-    if (extractInFlightRef.current) return
-    if (notifyExistingTask(extractTask, {
-      cancellingMessage: extractTaskCopy.cancellingMessage,
-      runningMessage: extractTaskCopy.runningMessage,
-    })) {
-      return
-    }
-
-    const actionableShots = selectedShots
-      .filter((item) => !item.skip_extraction)
-      .sort((a, b) => a.index - b.index)
-
-    if (actionableShots.length === 0) {
-      message.info('当前选中的镜头都已标记为无需提取，如需调整请先恢复提取')
-      return
-    }
-
-    extractInFlightRef.current = true
-    setBatchExtractingAssets(true)
-    try {
-      message.loading({ content: '加载项目资产库...', key: 'bind', duration: 0 })
-      const assetList = await loadProjectAssetsForBind()
-      if (!assetList) {
-        message.destroy('bind')
-        message.warning('项目还没有资产库。请先在"一键制作"或资产页完成资产提取与生成，再来此页绑定。')
-        return
-      }
-      const scriptDivision = {
-        total_shots: actionableShots.length,
-        shots: actionableShots.map((item) => ({
-          index: item.index,
-          start_line: 1,
-          end_line: 1,
-          script_excerpt: item.script_excerpt ?? '',
-          shot_name: item.title ?? '',
-        })),
-      }
-      message.loading({ content: `提交 ${actionableShots.length} 条镜头资产绑定任务...`, key: 'bind', duration: 0 })
-      await executeAsyncTaskCreate({
-        request: async () => {
-          const r = await fetch('/api/v1/script-processing/bind-assets-async', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              chapter_id: chapterId,
-              script_division_json: JSON.stringify(scriptDivision),
-              asset_list_json: JSON.stringify(assetList),
-            }),
-          })
-          const json = await r.json()
-          return (json?.data ? { data: json.data } : { data: null }) as { data: { task_id: string; status: TaskStatus; reused?: boolean | null } | null }
-        },
-        trackTaskData: trackExtractTaskData,
-        startedMessage: actionableShots.length > 1 ? `已开始绑定 ${actionableShots.length} 条镜头资产` : extractTaskCopy.startedMessage,
-        reusedMessage: extractTaskCopy.reusedMessage,
-        fallbackErrorMessage: '批量绑定失败',
-      })
-      message.destroy('bind')
-    } catch {
-      message.destroy('bind')
-    } finally {
-      setBatchExtractingAssets(false)
-      extractInFlightRef.current = false
-    }
-  }, [chapterId, extractTask, loadProjectAssetsForBind, projectId, selectedShots])
-
-  const cancelExtractTask = useCallback(async () => {
-    if (!extractTask?.taskId) return
-    try {
-      await executeTaskCancel({
-        taskId: extractTask.taskId,
-        reason: '用户在分镜编辑页取消提取任务',
-        applyCancelData: applyExtractCancelData,
-        cancelledImmediatelyMessage: extractTaskCopy.cancelledImmediatelyMessage,
-        cancelRequestedMessage: extractTaskCopy.cancelRequestedMessage,
-        fallbackErrorMessage: '取消提取任务失败',
-      })
-    } catch {
-      // executeTaskCancel 已统一处理错误提示
-    }
-  }, [applyExtractCancelData, extractTask])
-
-  useRelationTaskNotification({
-    task: extractTask,
-    settledTask: extractSettledTask,
-    title: extractTaskCopy.title,
-    sourceLabel: shot?.title ? `镜头：${shot.title}` : '分镜编辑页',
-    runningDescription: extractTaskCopy.runningDescription,
-    cancellingDescription: extractTaskCopy.cancellingDescription,
-    successDescription: extractTaskCopy.successDescription,
-    cancelledDescription: extractTaskCopy.cancelledDescription,
-    failedDescription: extractTaskCopy.failedDescription,
-    onCancel: extractTask ? () => void cancelExtractTask() : null,
-    onNavigate:
-      projectId && chapterId && shotId
-        ? () => navigate(getChapterShotEditPath(projectId, chapterId, shotId))
-        : null,
-  })
 
   const goShot = (id: string) => {
     if (!projectId || !chapterId || id === shotId) return
@@ -1478,17 +1247,6 @@ export function ChapterShotEditPage() {
                     </Space>
                     {multiSelectActive ? (
                       <Space size={6} className="shrink-0">
-                        <Tooltip title="批量绑定资产">
-                          <Button
-                            size="small"
-                            type="primary"
-                            shape="circle"
-                            icon={<ReloadOutlined />}
-                            loading={batchExtractingAssets || extractTaskActive}
-                            disabled={extractTaskActive}
-                            onClick={() => void batchExtractAssets()}
-                          />
-                        </Tooltip>
                         <Tooltip title="清空选择">
                           <Button
                             size="small"
@@ -1715,26 +1473,6 @@ export function ChapterShotEditPage() {
                           </div>
                         </div>
                         <div className="flex items-center gap-2">
-                          <Button
-                            type="primary"
-                            size="small"
-                            loading={extractingAssets || extractTaskActive}
-                            disabled={extractTaskActive}
-                            onClick={() => void extractAssets()}
-                          >
-                            绑定资产
-                          </Button>
-                          {extractTask ? (
-                            <Button
-                              size="small"
-                              danger
-                              icon={<CloseCircleOutlined />}
-                              disabled={extractTask.cancelRequested}
-                              onClick={() => void cancelExtractTask()}
-                            >
-                              {extractTask.cancelRequested ? '正在取消' : '取消提取'}
-                            </Button>
-                          ) : null}
                           {shot?.skip_extraction ? (
                             <Button
                               size="small"

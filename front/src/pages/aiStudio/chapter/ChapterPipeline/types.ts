@@ -9,13 +9,12 @@ export type StageStatus =
   | 'partial'
 
 export type StageKey =
-  | 'asset_extract'
-  | 'asset_images'
-  | 'divide'
-  | 'bind_assets'
-  | 'keyframes'
-  | 'videos'
-  | 'render'
+ | 'asset_extract'
+ | 'asset_images'
+ | 'divide'
+ | 'keyframes'
+ | 'videos'
+ | 'render'
 
 export type StageOutput = {
   /** 产出数量（已完成） */

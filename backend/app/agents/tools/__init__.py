@@ -13,7 +13,6 @@ from app.agents.tools.media_tools import (
     GenerateVideoTool,
 )
 from app.agents.tools.shot_tools import (
-    BindAssetsTool,
     ExtractShotsTool,
     QueryShotsTool,
 )
@@ -27,7 +26,6 @@ __all__ = [
     "GenerateImageTool",
     "CheckAssetStatusTool",
     "ExtractShotsTool",
-    "BindAssetsTool",
     "QueryShotsTool",
     "GenerateFrameTool",
     "GenerateVideoTool",

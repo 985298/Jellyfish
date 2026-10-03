@@ -13,7 +13,7 @@ _VOLCENGINE_DEFAULT = VideoModelCapability(
     supports_seed=True,
     supports_watermark=True,
     allowed_ratios=set(ALLOWED_RATIOS),
-    default_ratio="16:9",
+    default_ratio="9:16",
 )
 
 # key: 模型前缀（小写）

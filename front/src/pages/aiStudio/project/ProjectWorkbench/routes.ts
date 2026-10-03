@@ -3,7 +3,8 @@ export function getProjectChaptersPath(projectId: string) {
 }
 
 export function getChapterStudioPath(projectId: string, chapterId: string) {
-  // 老 Studio 页面已废弃，统一进入分镜列表页
+  // 历史命名：函数名为 Studio 但实际指向分镜列表页（老 Studio 页已废弃）。
+  // 保留函数名以避免 11 处调用方改动，新代码请直接用 getChapterShotsPath。
   return `/projects/${projectId}/chapters/${chapterId}/shots`
 }
 

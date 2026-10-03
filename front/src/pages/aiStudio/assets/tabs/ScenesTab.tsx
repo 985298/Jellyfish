@@ -10,8 +10,8 @@ export function ScenesTab({ projectId }: { projectId?: string } = {}) {
       label="场景"
       tabKey="scene"
       projectId={projectId}
-      listAssets={async ({ q, page, pageSize }) => {
-        const res = await StudioEntitiesApi.list('scene', { q: q ?? null, page, pageSize })
+      listAssets={async ({ q, projectId, page, pageSize }) => {
+        const res = await StudioEntitiesApi.list('scene', { q: q ?? null, projectId, page, pageSize })
         return { items: (res.data?.items ?? []) as any[], total: res.data?.pagination.total ?? 0 }
       }}
       createAsset={async (payload) => {

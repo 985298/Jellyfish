@@ -103,6 +103,7 @@ function LinkedAssetTab({
         kind === 'prop'
           ? await StudioEntitiesApi.list('prop', {
               q: q || null,
+              projectId,
               order: 'updated_at',
               isDesc: true,
               page: 1,
@@ -110,6 +111,7 @@ function LinkedAssetTab({
             })
           : await StudioEntitiesApi.list('costume', {
               q: q || null,
+              projectId,
               order: 'updated_at',
               isDesc: true,
               page: 1,

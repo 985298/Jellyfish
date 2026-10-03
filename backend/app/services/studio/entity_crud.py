@@ -10,7 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.utils import apply_keyword_filter, apply_order, paginate
-from app.models.studio import Actor, Chapter, Costume, Project, Shot, ShotCharacterLink
+from app.models.studio import Actor, Chapter, Costume, Project, ProjectActorLink, Prop, Scene, Shot, ShotCharacterLink
 from app.schemas.studio.cast import ShotCharacterLinkCreate
 from app.services.common import entity_already_exists, entity_not_found
 from app.services.studio.entity_specs import DEFAULT_VIEW_ANGLES, LINK_MODEL_BY_ENTITY, entity_spec, normalize_entity_type
@@ -50,6 +50,7 @@ async def list_entities_paginated(
     q: str | None,
     style: str | None,
     visual_style: str | None,
+    project_id: str | None,
     order: str | None,
     is_desc: bool,
     page: int,
@@ -63,6 +64,17 @@ async def list_entities_paginated(
         stmt = stmt.where(getattr(spec.model, "style") == style)
     if visual_style:
         stmt = stmt.where(getattr(spec.model, "visual_style") == visual_style)
+    if project_id:
+        if entity_type_norm == "actor":
+            # Actor 表无 project_id，经 ProjectActorLink 反查
+            stmt = stmt.join(ProjectActorLink, ProjectActorLink.actor_id == spec.model.id).where(
+                ProjectActorLink.project_id == project_id
+            )
+        elif entity_type_norm == "character":
+            stmt = stmt.where(spec.model.project_id == project_id)
+        else:
+            # scene / prop / costume 均有 project_id 字段
+            stmt = stmt.where(getattr(spec.model, "project_id") == project_id)
     stmt = apply_order(
         stmt,
         model=spec.model,

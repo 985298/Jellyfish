@@ -349,7 +349,7 @@ export function DashboardTab({ onSelectTab }: { onSelectTab: (tab: TabKey) => vo
               </div>
               <Progress percent={75} size="small" showInfo={false} />
             </div>
-            <Button type="link" className="p-0 mt-2" onClick={() => navigate('/assets')}>
+            <Button type="link" className="p-0 mt-2" onClick={() => navigate(`/assets?projectId=${projectId}`)}>
               管理资产
             </Button>
           </Card>

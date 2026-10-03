@@ -241,8 +241,8 @@ def test_get_video_generation_options_returns_ratio_capability(client: TestClien
     assert body["data"]["provider"] == "openai"
     assert body["data"]["model_id"] == "m-video"
     assert body["data"]["model_name"] == "sora-mini"
-    assert "16:9" in body["data"]["allowed_ratios"]
-    assert body["data"]["default_ratio"] == "16:9"
+    assert "9:16" in body["data"]["allowed_ratios"]
+    assert body["data"]["default_ratio"] == "9:16"
 
 
 def test_get_image_generation_options_returns_ratio_size_profiles(client: TestClient) -> None:

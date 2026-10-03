@@ -8,7 +8,7 @@ import {
   VideoCameraFilled,
 } from '@ant-design/icons'
 import { Link, useParams, useNavigate, useSearchParams } from 'react-router-dom'
-import { TAB_CONFIG, type TabKey, isTabKey, DEFAULT_TAB } from './constants'
+import { TAB_CONFIG, TAB_GROUPS, type TabKey, isTabKey, DEFAULT_TAB } from './constants'
 import { DashboardTab } from './tabs/DashboardTab'
 import { ChaptersTab } from './tabs/ChaptersTab'
 import { ActorsTab } from './tabs/ActorsTab'
@@ -162,7 +162,7 @@ const ProjectWorkbench: React.FC = () => {
   const moreMenuItems: MenuProps['items'] = [
     { key: 'newActor', label: '关联演员', onClick: () => setTabInUrl('actors') },
     { key: 'newRole', label: '新建角色', onClick: () => setTabInUrl('roles') },
-    { key: 'upload', label: '上传素材', onClick: () => navigate('/assets') },
+    { key: 'upload', label: '上传素材', onClick: () => navigate(`/assets?projectId=${projectId}`) },
     { key: 'newScene', label: '新建场景', onClick: () => setTabInUrl('scenes') },
     { key: 'newProp', label: '新建道具', onClick: () => setTabInUrl('props') },
     { key: 'newCostume', label: '新建服装', onClick: () => setTabInUrl('costumes') },
@@ -189,17 +189,34 @@ const ProjectWorkbench: React.FC = () => {
       >
         <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-gray-100">
           <Tabs
-            activeKey={activeTab}
-            onChange={(k) => setTabInUrl(k as TabKey)}
+            activeKey={TAB_GROUPS.find((g) => g.keys.includes(activeTab))?.label ?? activeTab}
+            onChange={(k) => {
+              const group = TAB_GROUPS.find((g) => g.label === k)
+              if (group && group.keys.length > 0) setTabInUrl(group.keys[0])
+            }}
             size="middle"
             className="project-workbench-tabs flex-1 min-w-0"
-            items={TAB_CONFIG.map(({ key, label, icon }) => ({
-              key,
-              label: (
-                <span className="flex items-center gap-1.5">
-                  {icon}
-                  {label}
-                </span>
+            items={TAB_GROUPS.map((group) => ({
+              key: group.label,
+              label: group.label,
+              children: (
+                <Tabs
+                  activeKey={activeTab}
+                  onChange={(k) => setTabInUrl(k as TabKey)}
+                  size="small"
+                  items={group.keys
+                    .map((k) => TAB_CONFIG.find((t) => t.key === k))
+                    .filter((t): t is { key: TabKey; label: string; icon: React.ReactNode } => !!t)
+                    .map(({ key, label, icon }) => ({
+                      key,
+                      label: (
+                        <span className="flex items-center gap-1.5">
+                          {icon}
+                          {label}
+                        </span>
+                      ),
+                    }))}
+                />
               ),
             }))}
           />

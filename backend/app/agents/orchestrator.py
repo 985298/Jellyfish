@@ -32,6 +32,7 @@ logger = logging.getLogger(__name__)
 ProgressCallback = Callable[[dict], None]
 
 # Director 的 next_action -> 执行该阶段的 specialist 名
+# bind_assets 已废弃：分镜输出自带 character_names/scene_name，绑定在 divide_shots 内完成
 _ACTION_TO_AGENT: dict[str, str] = {
     "extract_assets": "character_designer",
     "generate_asset_refs": "character_designer",

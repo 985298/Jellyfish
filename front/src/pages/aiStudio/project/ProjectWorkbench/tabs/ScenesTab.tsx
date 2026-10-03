@@ -90,6 +90,7 @@ export function ScenesTab() {
       const q = (searchQuery !== undefined ? searchQuery : search).trim()
       const res = await StudioEntitiesApi.list('scene', {
         q: q ? q : null,
+        projectId,
         order: 'updated_at',
         isDesc: true,
         page: 1,

@@ -36,6 +36,10 @@ export type ChapterRead = {
      * 章节状态
      */
     status?: ChapterStatus;
+    /**
+     * 资产阶段状态：not_started/running/done/failed/blocked/partial
+     */
+    asset_stage?: (string | null);
     id: string;
     /**
      * 分镜数（shots 条数聚合）

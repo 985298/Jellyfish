@@ -21,7 +21,7 @@ from app.chains.agents import (
     ScriptOptimizerAgent,
     ScriptSimplifierAgent,
 )
-from app.chains.agents.asset_extractor_agent import AssetExtractorAgent, ShotBinderAgent
+from app.chains.agents.asset_extractor_agent import AssetExtractorAgent
 from app.chains.agents.script_processing_agents import (
     ScriptConsistencyCheckResult,
     ScriptDivisionResult,
@@ -157,20 +157,6 @@ class AssetExtractResultGenerator(AbstractLLMResultGenerator):
         return agent.extract(
             project_id=str(run_args.get("project_id") or ""),
             script_text=str(run_args.get("script_text") or ""),
-        )
-
-
-class AssetBindResultGenerator(AbstractLLMResultGenerator):
-    """Binds existing project assets to shots using ShotBinderAgent."""
-
-    thinking = False
-
-    def generate_with_llm(self, llm, run_args: dict[str, Any]) -> Any:
-        agent = ShotBinderAgent(llm)
-        return agent.extract(
-            chapter_id=str(run_args.get("chapter_id") or ""),
-            script_division_json=str(run_args.get("script_division_json") or ""),
-            asset_list_json=str(run_args.get("asset_list_json") or ""),
         )
 
 
@@ -428,167 +414,6 @@ class AssetExtractTaskExecutor(AbstractWorkerTaskExecutor):
         )
 
 
-class AssetBindTaskExecutor(AbstractWorkerTaskExecutor):
-    """Binds existing project assets to shots based on script division.
-
-    Phase 3: consumes the division result + an asset list, resolves each named
-    asset to its stable entity id, and persists shot-level bindings (ShotCharacterLink
-    + ShotExtractedCandidate linked state). Does NOT create new assets.
-    """
-
-    task_kind = "script_asset_bind"
-    timeout_seconds = 300.0
-    succeeded_progress = 100
-
-    def __init__(self) -> None:
-        super().__init__(session_maker=sync_session_maker)
-        self._generator = AssetBindResultGenerator()
-
-    def execute(self, ctx: WorkerTaskContext, run_args: dict[str, Any]) -> Any:
-        return self._generator.generate(ctx.db, run_args)
-
-    def should_apply(self, ctx: WorkerTaskContext, run_args: dict[str, Any], result: Any) -> bool:  # noqa: ARG002
-        return bool(run_args.get("chapter_id"))
-
-    def apply_result(self, ctx: WorkerTaskContext, run_args: dict[str, Any], result: Any) -> None:
-        chapter_id = str(run_args.get("chapter_id") or "")
-        if not chapter_id:
-            raise HTTPException(status_code=400, detail="chapter_id is required for script_asset_bind")
-
-        chapter = ctx.db.get(Chapter, chapter_id)
-        if chapter is None:
-            raise HTTPException(status_code=400, detail="Chapter not found")
-        project_id = str(chapter.project_id)
-
-        shots = list(
-            ctx.db.execute(
-                select(Shot).where(Shot.chapter_id == chapter_id)
-            ).scalars().all()
-        )
-        shot_by_index: dict[int, Shot] = {shot.index: shot for shot in shots}
-
-        # Pre-resolve asset name -> id maps scoped to this project / global table.
-        def _resolve_character(name: str) -> str | None:
-            return _existing_character_id_by_name(ctx.db, project_id=project_id, name=name)
-
-        def _resolve_asset(model: type, name: str) -> str | None:
-            return _existing_asset_id_by_name(ctx.db, model=model, name=name)
-
-        bound_counts = {"character": 0, "scene": 0, "prop": 0, "costume": 0}
-
-        for shot_binding in list(getattr(result, "shots", []) or []):
-            index = getattr(shot_binding, "index", None)
-            shot = shot_by_index.get(int(index)) if index is not None else None
-            if shot is None:
-                continue
-
-            # Characters: upsert ShotCharacterLink + mark candidate linked.
-            character_names = [str(n).strip() for n in (getattr(shot_binding, "character_names", []) or []) if str(n).strip()]
-            existing_link_char_ids = {
-                str(row[0])
-                for row in ctx.db.execute(
-                    select(ShotCharacterLink.character_id).where(ShotCharacterLink.shot_id == shot.id)
-                ).all()
-            }
-            next_index = (
-                int(
-                    ctx.db.execute(
-                        select(ShotCharacterLink.index)
-                        .where(ShotCharacterLink.shot_id == shot.id)
-                        .order_by(ShotCharacterLink.index.desc())
-                        .limit(1)
-                    ).scalar() or 0
-                )
-            )
-            for name in character_names:
-                char_id = _resolve_character(name)
-                if char_id is None:
-                    continue
-                if char_id in existing_link_char_ids:
-                    bound_counts["character"] += 1
-                    continue
-                next_index += 1
-                ctx.db.add(
-                    ShotCharacterLink(
-                        shot_id=shot.id,
-                        character_id=char_id,
-                        index=next_index,
-                        note="",
-                    )
-                )
-                bound_counts["character"] += 1
-            ctx.db.flush()
-
-            # Scene / prop / costume: mark ShotExtractedCandidate linked by name.
-            scene_name = getattr(shot_binding, "scene_name", None)
-            if scene_name:
-                scene_name = str(scene_name).strip()
-                if scene_name:
-                    scene_id = _resolve_asset(Scene, scene_name)
-                    self._mark_candidate_linked(
-                        ctx.db, shot_id=shot.id, candidate_type=ShotCandidateType.scene,
-                        candidate_name=scene_name, linked_entity_id=scene_id,
-                    )
-                    bound_counts["scene"] += 1
-
-            for name in (getattr(shot_binding, "prop_names", []) or []):
-                name = str(name).strip()
-                if not name:
-                    continue
-                prop_id = _resolve_asset(Prop, name)
-                self._mark_candidate_linked(
-                    ctx.db, shot_id=shot.id, candidate_type=ShotCandidateType.prop,
-                    candidate_name=name, linked_entity_id=prop_id,
-                )
-                bound_counts["prop"] += 1
-
-            for name in (getattr(shot_binding, "costume_names", []) or []):
-                name = str(name).strip()
-                if not name:
-                    continue
-                costume_id = _resolve_asset(Costume, name)
-                self._mark_candidate_linked(
-                    ctx.db, shot_id=shot.id, candidate_type=ShotCandidateType.costume,
-                    candidate_name=name, linked_entity_id=costume_id,
-                )
-                bound_counts["costume"] += 1
-
-        ctx.db.commit()
-        logger.info(
-            "asset_bind applied: chapter_id=%s bound=%s",
-            chapter_id,
-            bound_counts,
-        )
-
-    @staticmethod
-    def _mark_candidate_linked(
-        db: Session,
-        *,
-        shot_id: str,
-        candidate_type: ShotCandidateType,
-        candidate_name: str,
-        linked_entity_id: str | None,
-    ) -> None:
-        """Mark a matching ShotExtractedCandidate as linked (if any). Idempotent / silent."""
-        if not linked_entity_id:
-            return
-        stmt = (
-            select(ShotExtractedCandidate)
-            .where(ShotExtractedCandidate.shot_id == shot_id)
-            .where(ShotExtractedCandidate.candidate_type == candidate_type)
-            .where(ShotExtractedCandidate.candidate_name == candidate_name)
-            .order_by(ShotExtractedCandidate.id.asc())
-            .limit(1)
-        )
-        row = db.execute(stmt).scalars().first()
-        if row is None:
-            return
-        row.candidate_status = ShotCandidateStatus.linked
-        row.linked_entity_id = linked_entity_id
-        from datetime import datetime, timezone
-        row.confirmed_at = datetime.now(timezone.utc)
-
-
 # === Sync helpers / public entry points ===
 
 
@@ -653,6 +478,3 @@ def run_asset_extract_task_sync(task_id: str) -> None:
     AssetExtractTaskExecutor().run(task_id)
 
 
-def run_asset_bind_task_sync(task_id: str) -> None:
-    """Phase 3 sync entry point for script_asset_bind tasks."""
-    AssetBindTaskExecutor().run(task_id)

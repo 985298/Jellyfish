@@ -42,7 +42,7 @@ export function AssetTypeTab({
 }: {
   label: string
   tabKey: 'scene' | 'prop' | 'costume'
-  listAssets: (params: { q?: string; page: number; pageSize: number }) => Promise<{ items: StudioAssetLike[]; total: number }>
+  listAssets: (params: { q?: string; projectId?: string | null; page: number; pageSize: number }) => Promise<{ items: StudioAssetLike[]; total: number }>
   createAsset: (payload: AssetCreatePayload) => Promise<StudioAssetLike>
   updateAsset: (id: string, payload: AssetMutationPayload) => Promise<StudioAssetLike>
   deleteAsset: (id: string) => Promise<void>
@@ -123,21 +123,20 @@ export function AssetTypeTab({
       const nextPageSize = opts?.pageSize ?? pageSize
       const nextQ = typeof opts?.q === 'string' ? opts.q : search.trim() || undefined
       if (projectId) {
-        // 选中项目时：后端列表不支持 project_id 过滤，前端拉取全部后按项目过滤，
-        // 再用客户端分页展示，避免分页错位（服务端分页 + 客户端过滤不一致）。
+        // 项目模式：后端现已支持 project_id 过滤，但仍按更新时间倒序拉取全量后做客户端分页，
+        // 以保持与原有的"项目内全部资产"展示一致。
         const all: StudioAssetLike[] = []
         let p = 1
         const fetchSize = 100
         for (let guard = 0; guard < 200; guard++) {
-          const res = await listAssets({ q: nextQ, page: p, pageSize: fetchSize })
+          const res = await listAssets({ q: nextQ, projectId, page: p, pageSize: fetchSize })
           const items = Array.isArray(res.items) ? res.items.map(normalizeAsset) : []
           all.push(...items)
           if (items.length === 0 || all.length >= (res.total ?? 0)) break
           p += 1
         }
-        const filteredAll = all.filter((a) => (a as Record<string, unknown>).project_id === projectId)
-        setAssets(filteredAll)
-        setTotal(filteredAll.length)
+        setAssets(all)
+        setTotal(all.length)
       } else {
         const res = await listAssets({ q: nextQ, page: nextPage, pageSize: nextPageSize })
         const items = Array.isArray(res.items) ? res.items.map(normalizeAsset) : []

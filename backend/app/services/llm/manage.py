@@ -294,8 +294,8 @@ async def get_video_generation_options(
             provider="",
             model_id="",
             model_name="",
-            allowed_ratios=["16:9"],
-            default_ratio="16:9",
+            allowed_ratios=["9:16"],
+            default_ratio="9:16",
         )
 
     model = await get_or_404(db, Model, model_id, detail=entity_not_found("Model"))

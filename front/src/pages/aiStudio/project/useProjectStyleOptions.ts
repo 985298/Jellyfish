@@ -36,7 +36,7 @@ type ProjectStyleOptionsSnapshot = {
 
 let cachedSnapshot: ProjectStyleOptionsSnapshot | null = null
 let loadingSnapshotPromise: Promise<ProjectStyleOptionsSnapshot> | null = null
-const FALLBACK_DEFAULT_VIDEO_RATIO = '16:9'
+ const FALLBACK_DEFAULT_VIDEO_RATIO = '9:16'
 
 function normalizeOptionItems(items: OptionItem[] | null | undefined): OptionItem[] {
   if (!Array.isArray(items)) return []

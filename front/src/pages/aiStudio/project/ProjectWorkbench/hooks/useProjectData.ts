@@ -43,6 +43,7 @@ function toUIProject(p: ProjectRead): Project {
 
 export type Chapter = MockChapter & {
   rawText?: string
+  assetStage?: 'not_started' | 'running' | 'done' | 'failed' | 'blocked' | 'partial'
 }
 
 function toUIChapter(c: ChapterRead): Chapter {
@@ -55,6 +56,7 @@ function toUIChapter(c: ChapterRead): Chapter {
     rawText: c.raw_text ?? '',
     storyboardCount: c.shot_count ?? c.storyboard_count ?? 0,
     status: c.status ?? 'draft',
+    assetStage: (c.asset_stage ?? undefined) as Chapter['assetStage'],
     updatedAt: new Date().toISOString(),
   }
 }
@@ -147,9 +149,8 @@ export function useProjectCharacters(projectId: string | undefined) {
     }
     setLoading(true)
     try {
-      // 后端统一实体列表不支持按 project_id 过滤，前端分页拉取全部后再按项目过滤，
-      // 否则当全局角色数 >100 时项目角色可能漏掉，导致 RolesTab 显示为空。
-      // 同时按更新时间倒序拉取，与资产列表默认排序保持一致。
+      // 后端现已支持按 project_id 过滤（character/scene/prop/costume 直接匹配，
+      // actor 经 ProjectActorLink 反查），但仍按更新时间倒序拉取与资产列表保持一致。
       const fetchSize = 100
       const all: Record<string, unknown>[] = []
       let page = 1
@@ -158,6 +159,7 @@ export function useProjectCharacters(projectId: string | undefined) {
           page,
           pageSize: fetchSize,
           q: null,
+          projectId,
           order: 'updated_at',
           isDesc: true,
         })
@@ -167,7 +169,7 @@ export function useProjectCharacters(projectId: string | undefined) {
         if (items.length === 0 || all.length >= total) break
         page += 1
       }
-      setCharacters(all.filter((x) => x.project_id === projectId))
+      setCharacters(all)
     } catch {
       setCharacters([])
     } finally {

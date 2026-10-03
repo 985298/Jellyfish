@@ -10,8 +10,8 @@ export function CostumesTab({ projectId }: { projectId?: string } = {}) {
       label="服装"
       tabKey="costume"
       projectId={projectId}
-      listAssets={async ({ q, page, pageSize }) => {
-        const res = await StudioEntitiesApi.list('costume', { q: q ?? null, page, pageSize })
+      listAssets={async ({ q, projectId, page, pageSize }) => {
+        const res = await StudioEntitiesApi.list('costume', { q: q ?? null, projectId, page, pageSize })
         return { items: (res.data?.items ?? []) as any[], total: res.data?.pagination.total ?? 0 }
       }}
       createAsset={async (payload) => {

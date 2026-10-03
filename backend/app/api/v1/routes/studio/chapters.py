@@ -22,10 +22,36 @@ from app.services.common import (
     require_entity,
 )
 from app.schemas.studio.projects import ChapterCreate, ChapterRead, ChapterUpdate
+from app.services.studio.project_status import collect_asset_stats
 
 router = APIRouter()
 
 CHAPTER_ORDER_FIELDS = {"index", "title", "created_at", "updated_at", "storyboard_count", "status"}
+
+
+async def _resolve_asset_stage(db: AsyncSession, project_id: str) -> str | None:
+    """根据项目资产统计推断 asset_stage：有资产且有参考图视为 done，有资产缺参考图视为 partial，
+    无资产视为 not_started。运行/失败/阻塞需任务事件驱动，此处不推断（返回 None 表示未知）。
+    """
+    if not project_id:
+        return None
+    assets = await collect_asset_stats(db, project_id)
+    if assets["total"] == 0:
+        return "not_started"
+    if assets.get("has_refs", False):
+        return "done"
+    return "partial"
+
+
+async def _chapter_read_with_extras(db: AsyncSession, chapter: Chapter) -> ChapterRead:
+    """构造 ChapterRead，回填 shot_count 与 asset_stage。"""
+    count_stmt = select(func.count(Shot.id)).where(Shot.chapter_id == chapter.id)
+    shot_count = int((await db.execute(count_stmt)).scalar() or 0)
+    asset_stage = await _resolve_asset_stage(db, str(chapter.project_id))
+    return ChapterRead.model_validate(chapter).model_copy(
+        update={"shot_count": shot_count, "asset_stage": asset_stage}
+    )
+
 
 
 @router.get(
@@ -67,9 +93,20 @@ async def list_chapters(
         res = await db.execute(count_stmt)
         shot_count_by_chapter = {str(ch_id): int(cnt) for ch_id, cnt in res.all()}
 
+    # asset_stage 按项目推断：同一项目的章节共享同一个 asset_stage 值。
+    project_ids = {str(c.project_id) for c in items}
+    asset_stage_by_project: dict[str, str | None] = {}
+    for pid in project_ids:
+        asset_stage_by_project[pid] = await _resolve_asset_stage(db, pid)
+
     return paginated_response(
         [
-            ChapterRead.model_validate(x).model_copy(update={"shot_count": shot_count_by_chapter.get(x.id, 0)})
+            ChapterRead.model_validate(x).model_copy(
+                update={
+                    "shot_count": shot_count_by_chapter.get(x.id, 0),
+                    "asset_stage": asset_stage_by_project.get(str(x.project_id)),
+                }
+            )
             for x in items
         ],
         page=page,
@@ -115,10 +152,7 @@ async def get_chapter(
     db: AsyncSession = Depends(get_db),
 ) -> ApiResponse[ChapterRead]:
     obj = await get_or_404(db, Chapter, chapter_id, detail=entity_not_found("Chapter"))
-    count_stmt = select(func.count(Shot.id)).where(Shot.chapter_id == chapter_id)
-    res = await db.execute(count_stmt)
-    shot_count = int(res.scalar() or 0)
-    return success_response(ChapterRead.model_validate(obj).model_copy(update={"shot_count": shot_count}))
+    return success_response(await _chapter_read_with_extras(db, obj))
 
 
 @router.patch(

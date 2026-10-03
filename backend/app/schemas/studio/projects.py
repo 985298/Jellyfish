@@ -55,6 +55,7 @@ class ChapterBase(BaseModel):
     condensed_text: str = Field("", description="精简原文")
     storyboard_count: int = Field(0, description="分镜数量")
     status: ChapterStatus = Field(ChapterStatus.draft, description="章节状态")
+    asset_stage: str | None = Field(None, description="资产阶段状态：not_started/running/done/failed/blocked/partial")
 
 
 class ChapterCreate(ChapterBase):
@@ -70,6 +71,7 @@ class ChapterUpdate(BaseModel):
     condensed_text: str | None = None
     storyboard_count: int | None = None
     status: ChapterStatus | None = None
+    asset_stage: str | None = None
 
 
 class ChapterRead(ChapterBase):

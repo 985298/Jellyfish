@@ -40,8 +40,8 @@ export function ActorsTab({ projectId: propProjectId }: { projectId?: string } =
       const nextPageSize = opts?.pageSize ?? pageSize
       const q = typeof opts?.q === 'string' ? opts.q : search.trim() || undefined
       if (projectId) {
-        // 选中项目时：后端统一实体列表不支持 project_id 过滤，前端拉取全部后按项目过滤，
-        // 再用客户端分页展示，避免分页错位（服务端分页 + 客户端过滤不一致）。
+        // 项目模式：后端现已支持 project_id 过滤，但仍按更新时间倒序拉取全量后做客户端分页，
+        // 以保持与原有的"项目内全部角色"展示一致。
         const all: Record<string, unknown>[] = []
         let p = 1
         const fetchSize = 100
@@ -50,6 +50,7 @@ export function ActorsTab({ projectId: propProjectId }: { projectId?: string } =
             page: p,
             pageSize: fetchSize,
             q: q ?? null,
+            projectId,
             order: 'updated_at',
             isDesc: true,
           })
@@ -59,9 +60,8 @@ export function ActorsTab({ projectId: propProjectId }: { projectId?: string } =
           if (items.length === 0 || all.length >= serverTotal) break
           p += 1
         }
-        const projectActors = all.filter((a) => a.project_id === projectId)
-        setActors(projectActors as unknown as typeof actors)
-        setTotal(projectActors.length)
+        setActors(all as unknown as typeof actors)
+        setTotal(all.length)
       } else {
         const res = await StudioEntitiesApi.list('character', {
           page: nextPage,

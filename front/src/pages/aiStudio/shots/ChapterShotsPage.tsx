@@ -20,42 +20,21 @@ import {
 import type { TableColumnsType } from 'antd'
 import {
   ArrowLeftOutlined,
-  CloseCircleOutlined,
   DeleteOutlined,
   EditOutlined,
   FileSearchOutlined,
   PlusOutlined,
-  ThunderboltOutlined,
   ReloadOutlined,
-  ScissorOutlined,
-  VideoCameraOutlined,
+  ThunderboltOutlined,
 } from '@ant-design/icons'
 import type { ShotRead, ShotRuntimeSummaryRead, ShotStatus } from '../../../services/generated'
-import { ScriptProcessingService, StudioChaptersService, StudioEntitiesService, StudioShotsService } from '../../../services/generated'
-import { executeAsyncTaskCreate, executeTaskCancel } from '../components/taskActionHelpers'
+import { StudioChaptersService, StudioShotsService } from '../../../services/generated'
 import { Link, Navigate, useNavigate, useParams } from 'react-router-dom'
-import { getChapterShotEditPath, getChapterShotsPath, getChapterStudioPath } from '../project/ProjectWorkbench/routes'
-import { useCancelableRelationTask } from '../project/ProjectWorkbench/chapterDivisionTasks'
-import { useRelationTaskNotification } from '../components/taskNotificationHelpers'
-import { useTaskPageContext } from '../components/taskPageContext'
-import { createTaskSettledReloader } from '../components/taskResultHelpers'
-import { TASK_COPY } from '../components/taskCopy'
+import { getChapterShotEditPath } from '../project/ProjectWorkbench/routes'
+import { getChapterStudioPath } from '../project/ProjectWorkbench/routes'
 
 const { Header, Content } = Layout
 type ShotListFilter = 'all' | 'pending' | 'generating' | 'ready'
-
-function getErrorMessage(e: unknown) {
-  if (!e) return '请求失败'
-  if (typeof e === 'string') return e
-  if (typeof e === 'object') {
-    const maybeAny = e as any
-    const detail = maybeAny?.body?.detail ?? maybeAny?.detail
-    if (typeof detail === 'string' && detail.trim()) return detail
-    const msg = maybeAny?.message
-    if (typeof msg === 'string' && msg.trim()) return msg
-  }
-  return '请求失败'
-}
 
 function statusTag(status?: ShotStatus) {
   if (!status) return <span className="text-gray-400">—</span>
@@ -104,11 +83,9 @@ function getShotPreparationState(shot: ShotRead, runtime?: ShotRuntimeState): Sh
 }
 
 export function ChapterShotsPage() {
-  const taskCopy = TASK_COPY.chapterDivision
   const navigate = useNavigate()
   const { projectId, chapterId } = useParams<{ projectId: string; chapterId: string }>()
   const [loading, setLoading] = useState(false)
-  const [extracting, setExtracting] = useState(false)
   const [shots, setShots] = useState<ShotRead[]>([])
   const [shotRuntimeMap, setShotRuntimeMap] = useState<Record<string, ShotRuntimeState>>({})
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([])
@@ -116,51 +93,45 @@ export function ChapterShotsPage() {
   const [searchText, setSearchText] = useState('')
   const [chapterTitle, setChapterTitle] = useState<string>('')
   const [chapterIndex, setChapterIndex] = useState<number | null>(null)
-  const [chapterRawText, setChapterRawText] = useState<string>('')
-  const [chapterCondensedText, setChapterCondensedText] = useState<string>('')
   const [loadingChapter, setLoadingChapter] = useState(false)
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [batchDeleting, setBatchDeleting] = useState(false)
-  const [batchFrameLoading, setBatchFrameLoading] = useState(false)
-  const [batchVideoLoading, setBatchVideoLoading] = useState(false)
-  const [batchBindLoading, setBatchBindLoading] = useState(false)
   const [createOpen, setCreateOpen] = useState(false)
   const [createSubmitting, setCreateSubmitting] = useState(false)
   const [createForm] = Form.useForm<{ title: string; script_excerpt?: string }>()
-  const [chapterDivisionTaskLoading, setChapterDivisionTaskLoading] = useState(false)
 
   const refresh = async () => {
     if (!chapterId) return
     setLoading(true)
     try {
-      const [res, runtimeRes] = await Promise.all([
-        StudioShotsService.listShotsApiV1StudioShotsGet({
-          chapterId,
-          page: 1,
-          pageSize: 100,
-          order: 'index',
-          isDesc: false,
-        }),
-        StudioShotsService.listShotRuntimeSummaryApiV1StudioShotsRuntimeSummaryGet({
-          chapterId,
-        }),
-      ])
+      const res = await StudioShotsService.listShotsApiV1StudioShotsGet({
+        chapterId,
+        page: 1,
+        pageSize: 100,
+        order: 'index',
+        isDesc: false,
+      })
       setShots(res.data?.items ?? [])
-      const runtimeItems: ShotRuntimeSummaryRead[] = runtimeRes.data ?? []
-      setShotRuntimeMap(
-        Object.fromEntries(
-          runtimeItems.map((item) => [
-            item.shot_id,
-            {
-              has_active_tasks: item.has_active_tasks,
-              has_active_video_tasks: item.has_active_video_tasks,
-              has_active_prompt_tasks: item.has_active_prompt_tasks,
-              has_active_frame_tasks: item.has_active_frame_tasks,
-              active_task_count: item.active_task_count,
-            },
-          ]),
-        ),
-      )
+      try {
+        const runtimeRes = await StudioShotsService.listShotRuntimeSummaryApiV1StudioShotsRuntimeSummaryGet({ chapterId })
+        const runtimeItems: ShotRuntimeSummaryRead[] = runtimeRes.data ?? []
+        setShotRuntimeMap(
+          Object.fromEntries(
+            runtimeItems.map((item) => [
+              item.shot_id,
+              {
+                has_active_tasks: item.has_active_tasks,
+                has_active_video_tasks: item.has_active_video_tasks,
+                has_active_prompt_tasks: item.has_active_prompt_tasks,
+                has_active_frame_tasks: item.has_active_frame_tasks,
+                active_task_count: item.active_task_count,
+              },
+            ]),
+          ),
+        )
+      } catch {
+        setShotRuntimeMap({})
+      }
       setSelectedRowKeys([])
     } catch {
       message.error('加载分镜失败')
@@ -168,24 +139,6 @@ export function ChapterShotsPage() {
       setLoading(false)
     }
   }
-
-  const reloadShotsAfterTaskSettled = useCallback(createTaskSettledReloader(refresh), [refresh])
-  const { task: chapterDivisionTask, settledTask: chapterDivisionSettledTask, trackTaskData, applyCancelData } = useCancelableRelationTask({
-    enabled: !!chapterId,
-    relationType: 'chapter_division',
-    relationEntityId: chapterId,
-    onTaskSettled: reloadShotsAfterTaskSettled,
-  })
-  useTaskPageContext(
-    chapterId
-      ? [
-          {
-            relationType: 'chapter_division',
-            relationEntityId: chapterId,
-          },
-        ]
-      : [],
-  )
 
   useEffect(() => {
     setSelectedRowKeys([])
@@ -201,8 +154,6 @@ export function ChapterShotsPage() {
         const c = res.data
         setChapterTitle(c?.title ?? '')
         setChapterIndex(typeof c?.index === 'number' ? c.index : null)
-        setChapterRawText(c?.raw_text?.trim?.() ? c.raw_text.trim() : '')
-        setChapterCondensedText(c?.condensed_text?.trim?.() ? c.condensed_text.trim() : '')
       })
       .catch(() => {
         message.error('章节加载失败')
@@ -282,73 +233,6 @@ export function ChapterShotsPage() {
     }
   }, [chapterId, closeCreate, createForm, shots])
 
-  const handleOneClickExtract = useCallback(async () => {
-    if (!chapterId) return
-    const scriptText = (chapterCondensedText || chapterRawText).trim()
-    if (!scriptText) {
-      message.error('章节没有可用文本（condensed/raw 为空）')
-      return
-    }
-    setExtracting(true)
-    try {
-      await executeAsyncTaskCreate({
-        request: () =>
-          ScriptProcessingService.divideScriptAsyncApiV1ScriptProcessingDivideAsyncPost({
-            requestBody: {
-              script_text: scriptText,
-              write_to_db: true,
-              chapter_id: chapterId,
-            },
-          }),
-        trackTaskData,
-        startedMessage: taskCopy.startedMessage,
-        reusedMessage: taskCopy.reusedMessage,
-        fallbackErrorMessage: '启动分镜提取失败',
-        getErrorMessage: (error) => getErrorMessage(error),
-      })
-    } catch {
-      // executeAsyncTaskCreate 已统一处理错误提示
-    } finally {
-      setExtracting(false)
-    }
-  }, [chapterCondensedText, chapterId, chapterRawText])
-
-  const handleCancelChapterDivisionTask = useCallback(async () => {
-    if (!chapterDivisionTask) return
-    setChapterDivisionTaskLoading(true)
-    try {
-      await executeTaskCancel({
-        taskId: chapterDivisionTask.taskId,
-        reason: '用户在分镜列表页取消分镜提取',
-        applyCancelData,
-        cancelledImmediatelyMessage: taskCopy.cancelledImmediatelyMessage,
-        cancelRequestedMessage: taskCopy.cancelRequestedMessage,
-        fallbackErrorMessage: '取消任务失败',
-      })
-    } catch {
-      // executeTaskCancel 已统一处理错误提示
-    } finally {
-      setChapterDivisionTaskLoading(false)
-    }
-  }, [chapterDivisionTask])
-
-  useRelationTaskNotification({
-    task: chapterDivisionTask,
-    settledTask: chapterDivisionSettledTask,
-    title: taskCopy.title,
-    sourceLabel: chapterTitle ? `章节：${chapterTitle}` : '分镜管理页',
-    runningDescription: taskCopy.runningDescription,
-    cancellingDescription: taskCopy.cancellingDescription,
-    successDescription: taskCopy.successDescription,
-    cancelledDescription: taskCopy.cancelledDescription,
-    failedDescription: taskCopy.failedDescription,
-    onCancel: chapterDivisionTask ? () => void handleCancelChapterDivisionTask() : null,
-    onNavigate:
-      projectId && chapterId
-        ? () => navigate(getChapterShotsPath(projectId, chapterId))
-        : null,
-  })
-
   const handleDelete = useCallback(
     async (shotId: string) => {
       setDeletingId(shotId)
@@ -365,155 +249,6 @@ export function ChapterShotsPage() {
     },
     [],
   )
-
-
-  const handleBatchBindAssets = async () => {
-    if (selectedRowKeys.length === 0) return
-    if (!projectId || !chapterId) return
-    const selectedShots = shots.filter((s) => selectedRowKeys.includes(s.id))
-    const eligible = selectedShots.filter((s) => !s.skip_extraction && s.extraction?.state !== 'extracted_resolved')
-    const skipped = selectedShots.length - eligible.length
-    if (eligible.length === 0) {
-      message.warning(`已选 ${selectedShots.length} 项均无可绑定镜头，已跳过 ${skipped} 个`)
-      return
-    }
-    setBatchBindLoading(true)
-    try {
-      const groups: { characters: unknown[]; scenes: unknown[]; props: unknown[]; costumes: unknown[] } = { characters: [], scenes: [], props: [], costumes: [] }
-      const entityTypes: Array<{ type: string; key: keyof typeof groups }> = [
-        { type: 'character', key: 'characters' },
-        { type: 'scene', key: 'scenes' },
-        { type: 'prop', key: 'props' },
-        { type: 'costume', key: 'costumes' },
-      ]
-      for (const { type, key } of entityTypes) {
-        try {
-          const res = await StudioEntitiesService.listEntitiesApiV1StudioEntitiesEntityTypeGet({ entityType: type, pageSize: 100 })
-          const items = (res.data?.items as unknown[] | undefined) ?? []
-          groups[key] = items.map((item) => {
-            const obj = (item ?? {}) as Record<string, unknown>
-            return { name: obj.name ?? obj.title ?? '', thumbnail: obj.thumbnail ?? null, id: obj.id ?? null, file_id: obj.file_id ?? null }
-          }).filter((item) => String(item.name).length > 0)
-        } catch {
-          groups[key] = []
-        }
-      }
-      const totalAssets = groups.characters.length + groups.scenes.length + groups.props.length + groups.costumes.length
-      if (totalAssets === 0) {
-        message.warning('项目还没有资产库。请先在"一键制作"或资产页完成资产提取与生成，再来此页绑定。')
-        return
-      }
-      const scriptDivision = {
-        total_shots: eligible.length,
-        shots: eligible.map((item) => ({
-          index: item.index,
-          start_line: 1,
-          end_line: 1,
-          script_excerpt: item.script_excerpt ?? '',
-          shot_name: item.title ?? '',
-        })),
-      }
-      let submitted = false
-      let failed = false
-      try {
-        const r = await fetch('/api/v1/script-processing/bind-assets-async', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            chapter_id: chapterId,
-            script_division_json: JSON.stringify(scriptDivision),
-            asset_list_json: JSON.stringify(groups),
-          }),
-        })
-        submitted = r.ok
-        if (!r.ok) failed = true
-      } catch {
-        failed = true
-      }
-      const parts: string[] = []
-      if (submitted) parts.push(`已提交 ${eligible.length} 条镜头资产绑定任务`)
-      else parts.push('资产绑定任务提交失败')
-      if (skipped > 0) parts.push(`跳过 ${skipped} 个已绑定或无需提取`)
-      if (failed) parts.push('提交失败')
-      message.success(parts.join('，'))
-    } catch {
-      message.error('批量绑定资产失败')
-    } finally {
-      setBatchBindLoading(false)
-    }
-  }
-
-  const handleBatchGenerateFrames = async () => {
-    if (selectedRowKeys.length === 0) return
-    const selectedShots = shots.filter((s) => selectedRowKeys.includes(s.id))
-    const eligible = selectedShots.filter((s) => s.extraction?.has_extracted)
-    const skipped = selectedShots.length - eligible.length
-    if (eligible.length === 0) {
-      message.warning(`\u5df2\u9009 ${selectedShots.length} \u9879\u5747\u672a\u7ed1\u5b9a\u8d44\u4ea7\uff0c\u5df2\u8df3\u8fc7 ${skipped} \u4e2a\uff0c\u65e0\u6cd5\u751f\u6210\u5e27\u56fe`)
-      return
-    }
-    setBatchFrameLoading(true)
-    try {
-      let submitted = 0
-      let failed = 0
-      for (const shot of eligible) {
-        try {
-          await fetch(`/api/v1/studio/image-tasks/shot/${shot.id}/frame-image-tasks`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ frame_type: 'first', model_id: null }),
-          })
-          submitted++
-        } catch {
-          failed++
-        }
-      }
-      const parts = [`\u5df2\u63d0\u4ea4 ${submitted}/${selectedShots.length} \u4e2a\u5e27\u56fe\u751f\u6210\u4efb\u52a1`]
-      if (skipped > 0) parts.push(`\u8df3\u8fc7 ${skipped} \u4e2a\u672a\u7ed1\u5b9a\u8d44\u4ea7`)
-      if (failed > 0) parts.push(`\u5931\u8d25 ${failed}`)
-      message.success(parts.join('\uff0c'))
-    } catch {
-      message.error('\u6279\u91cf\u751f\u6210\u5e27\u56fe\u5931\u8d25')
-    } finally {
-      setBatchFrameLoading(false)
-    }
-  }
-
-  const handleBatchGenerateVideos = async () => {
-    if (selectedRowKeys.length === 0) return
-    const selectedShots = shots.filter((s) => selectedRowKeys.includes(s.id))
-    const eligible = selectedShots.filter((s) => s.status === 'ready')
-    const skipped = selectedShots.length - eligible.length
-    if (eligible.length === 0) {
-      message.warning(`\u5df2\u9009 ${selectedShots.length} \u9879\u5747\u672a\u5c31\u7eea\uff08\u65e0\u5e27\u56fe\uff09\uff0c\u5df2\u8df3\u8fc7 ${skipped} \u4e2a\uff0c\u65e0\u6cd5\u751f\u6210\u89c6\u9891`)
-      return
-    }
-    setBatchVideoLoading(true)
-    try {
-      let submitted = 0
-      let failed = 0
-      for (const shot of eligible) {
-        try {
-          await fetch('/api/v1/film/tasks/video', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ shot_id: shot.id, reference_mode: 'text_only', ratio: '16:9', prompt: '' }),
-          })
-          submitted++
-        } catch {
-          failed++
-        }
-      }
-      const parts = [`\u5df2\u63d0\u4ea4 ${submitted}/${selectedShots.length} \u4e2a\u89c6\u9891\u751f\u6210\u4efb\u52a1`]
-      if (skipped > 0) parts.push(`\u8df3\u8fc7 ${skipped} \u4e2a\u672a\u5c31\u7eea`)
-      if (failed > 0) parts.push(`\u5931\u8d25 ${failed}`)
-      message.success(parts.join('\uff0c'))
-    } catch {
-      message.error('\u6279\u91cf\u751f\u6210\u89c6\u9891\u5931\u8d25')
-    } finally {
-      setBatchVideoLoading(false)
-    }
-  }
 
   const handleBatchDelete = useCallback(async () => {
     if (selectedShotIds.length === 0) return
@@ -627,8 +362,6 @@ export function ChapterShotsPage() {
               type="link"
               size="small"
               icon={<EditOutlined />}
-              disabled={extracting}
-              loading={extracting}
               onClick={() =>
                 projectId &&
                 chapterId &&
@@ -642,16 +375,14 @@ export function ChapterShotsPage() {
               okText="删除"
               cancelText="取消"
               onConfirm={() => void handleDelete(r.id)}
-              okButtonProps={{ loading: extracting || deletingId === r.id, disabled: extracting }}
-              cancelButtonProps={{ disabled: extracting }}
+              okButtonProps={{ loading: deletingId === r.id }}
             >
               <Button
                 type="link"
                 size="small"
                 danger
                 icon={<DeleteOutlined />}
-                loading={extracting || deletingId === r.id}
-                disabled={extracting}
+                loading={deletingId === r.id}
               >
                 删除
               </Button>
@@ -660,7 +391,7 @@ export function ChapterShotsPage() {
         ),
       },
     ],
-    [chapterId, deletingId, extracting, handleDelete, navigate, projectId, shotRuntimeMap],
+    [chapterId, deletingId, handleDelete, navigate, projectId, shotRuntimeMap],
   )
 
   const tableEmpty =
@@ -715,21 +446,13 @@ export function ChapterShotsPage() {
         </div>
 
         {shots.length > 0 ? (
-          <Space>
-            <Button
-              type="primary"
-              icon={<FileSearchOutlined />}
-              onClick={() => navigate(getChapterStudioPath(projectId, chapterId))}
-            >
-              进入分镜工作室
-            </Button>
-            <Button
-              icon={<VideoCameraOutlined />}
-              onClick={() => navigate(getChapterStudioPath(projectId, chapterId))}
-            >
-              继续当前镜头
-            </Button>
-          </Space>
+          <Button
+            type="primary"
+            icon={<FileSearchOutlined />}
+            onClick={() => navigate(getChapterStudioPath(projectId, chapterId))}
+          >
+            进入分镜工作室
+          </Button>
         ) : null}
       </Header>
 
@@ -775,82 +498,25 @@ export function ChapterShotsPage() {
                     okText="删除"
                     cancelText="取消"
                     onConfirm={() => void handleBatchDelete()}
-                    okButtonProps={{ danger: true, loading: batchDeleting, disabled: extracting || batchDeleting }}
-                    cancelButtonProps={{ disabled: extracting || batchDeleting }}
+                    okButtonProps={{ danger: true, loading: batchDeleting }}
                   >
-                    <Button danger icon={<DeleteOutlined />} loading={batchDeleting} disabled={extracting || batchDeleting}>
+                    <Button danger icon={<DeleteOutlined />} loading={batchDeleting}>
                       批量删除
                     </Button>
                   </Popconfirm>
-                  <Button
-                    icon={<VideoCameraOutlined />}
-                    loading={batchBindLoading}
-                    disabled={extracting || batchDeleting || batchFrameLoading || batchVideoLoading}
-                    onClick={() => void handleBatchBindAssets()}
-                  >
-                    \u6279\u91cf\u7ed1\u5b9a\u8d44\u4ea7
-                  </Button>
-                  <Button
-                    icon={<VideoCameraOutlined />}
-                    loading={batchFrameLoading}
-                    disabled={extracting || batchDeleting || batchVideoLoading || batchBindLoading}
-                    onClick={() => void handleBatchGenerateFrames()}
-                  >
-                    \u6279\u91cf\u5e27\u56fe
-                  </Button>
-                  <Button
-                    icon={<VideoCameraOutlined />}
-                    loading={batchVideoLoading}
-                    disabled={extracting || batchDeleting || batchFrameLoading || batchBindLoading}
-                    onClick={() => void handleBatchGenerateVideos()}
-                  >
-                    \u6279\u91cf\u89c6\u9891
-                  </Button>
                 </>
               ) : null}
-              <Tooltip
-                title={
-                  chapterDivisionTask
-                    ? '当前章节已有分镜提取任务在运行'
-                    : shots.length > 0
-                      ? '已存在分镜时不允许同步分镜，需先清空分镜'
-                      : undefined
-                }
-              >
-                <span>
-                  <Button
-                    type={shots.length === 0 ? 'primary' : 'default'}
-                    icon={<ScissorOutlined />}
-                    loading={extracting}
-                    disabled={extracting || shots.length > 0 || !!chapterDivisionTask}
-                    onClick={() => void handleOneClickExtract()}
-                  >
-                    {chapterDivisionTask ? '分镜提取中' : shots.length === 0 ? '一键提取分镜' : '重新提取需先清空分镜'}
-                  </Button>
-                </span>
-              </Tooltip>
-              <Button icon={<PlusOutlined />} onClick={openCreate} loading={extracting} disabled={extracting}>
+              <Button icon={<PlusOutlined />} onClick={openCreate} loading={createSubmitting} disabled={createSubmitting}>
                 创建分镜
               </Button>
               <Button
                 icon={<ReloadOutlined />}
-                loading={extracting || loading}
-                disabled={extracting || batchDeleting}
+                loading={loading}
+                disabled={batchDeleting}
                 onClick={() => void refresh()}
               >
                 刷新
               </Button>
-              {chapterDivisionTask ? (
-                <Button
-                  danger
-                  icon={<CloseCircleOutlined />}
-                  loading={chapterDivisionTaskLoading}
-                  disabled={chapterDivisionTask.cancelRequested || chapterDivisionTaskLoading}
-                  onClick={() => void handleCancelChapterDivisionTask()}
-                >
-                  {chapterDivisionTask.cancelRequested ? '正在取消' : '取消提取'}
-                </Button>
-              ) : null}
             </Space>
           }
         >
@@ -877,14 +543,14 @@ export function ChapterShotsPage() {
                 <Space size="small" wrap>
                   <Button
                     icon={<FileSearchOutlined />}
-                    disabled={extracting || batchDeleting}
+                    disabled={batchDeleting}
                     onClick={handleOpenSelectedInStudio}
                   >
                     处理首个已选
                   </Button>
                   <Button
                     type="text"
-                    disabled={extracting || batchDeleting}
+                    disabled={batchDeleting}
                     onClick={() => setSelectedRowKeys([])}
                   >
                     清空选择
@@ -901,7 +567,7 @@ export function ChapterShotsPage() {
                   selectedRowKeys,
                   onChange: (keys) => setSelectedRowKeys(keys),
                   getCheckboxProps: () => ({
-                    disabled: extracting || batchDeleting,
+                    disabled: batchDeleting,
                   }),
                 }}
                 columns={columns}
@@ -920,14 +586,11 @@ export function ChapterShotsPage() {
       <Modal
         title="创建分镜"
         open={createOpen}
-        onCancel={extracting ? undefined : closeCreate}
+        onCancel={closeCreate}
         onOk={() => void submitCreate()}
-        confirmLoading={extracting || createSubmitting}
-        okButtonProps={{ loading: extracting || createSubmitting, disabled: extracting }}
-        cancelButtonProps={{ disabled: extracting }}
-        closable={!extracting}
-        maskClosable={!extracting}
-        keyboard={!extracting}
+        confirmLoading={createSubmitting}
+        okButtonProps={{ loading: createSubmitting }}
+        cancelButtonProps={{}}
         destroyOnClose
         width={520}
       >

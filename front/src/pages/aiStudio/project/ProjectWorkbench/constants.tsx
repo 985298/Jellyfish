@@ -61,3 +61,15 @@ export const chapterStatusMap: Record<Chapter['status'], { color: string; text: 
   done: { color: 'success', text: '完成' },
 }
 
+export type TabGroup = {
+  label: string
+  keys: TabKey[]
+}
+
+export const TAB_GROUPS: TabGroup[] = [
+  { label: '总览', keys: ['dashboard', 'chapters'] },
+  { label: '资产', keys: ['actors', 'roles', 'scenes', 'props', 'costumes', 'files'] },
+  { label: '后期', keys: ['edit'] },
+  { label: '其他', keys: ['settings'] },
+]
+

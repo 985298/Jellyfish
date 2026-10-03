@@ -38,7 +38,6 @@ COSTUME_INFO_ANALYSIS_RELATION_TYPE = "costume_info_analysis"
 SCRIPT_OPTIMIZATION_RELATION_TYPE = "script_optimization"
 SCRIPT_SIMPLIFICATION_RELATION_TYPE = "script_simplification"
 ASSET_EXTRACTION_RELATION_TYPE = "asset_extraction"
-ASSET_BINDING_RELATION_TYPE = "asset_binding"
 SCRIPT_DIVIDE_TASK_KIND = "script_divide"
 SCRIPT_MERGE_TASK_KIND = "script_merge"
 SCRIPT_CONSISTENCY_TASK_KIND = "script_consistency"
@@ -50,7 +49,6 @@ SCRIPT_COSTUME_INFO_TASK_KIND = "script_costume_info"
 SCRIPT_OPTIMIZE_TASK_KIND = "script_optimize"
 SCRIPT_SIMPLIFY_TASK_KIND = "script_simplify"
 SCRIPT_ASSET_EXTRACT_TASK_KIND = "script_asset_extract"
-SCRIPT_ASSET_BIND_TASK_KIND = "script_asset_bind"
 _ACTIVE_TASK_STATUSES = (
     GenerationTaskStatus.pending,
     GenerationTaskStatus.running,
@@ -677,17 +675,6 @@ def pick_extract_relation_entity_id(*, project_id: str | None) -> str:
     return relation_entity_id
 
 
-def pick_bind_relation_entity_id(*, chapter_id: str | None) -> str:
-    """Resolve the relation_entity_id for asset-binding tasks (chapter-scoped)."""
-    relation_entity_id = (chapter_id or "").strip()
-    if not relation_entity_id:
-        raise HTTPException(
-            status_code=400,
-            detail=required_field("chapter_id", when="bind-assets-async"),
-        )
-    return relation_entity_id
-
-
 async def _find_active_asset_extract_task(
     db: AsyncSession,
     *,
@@ -697,18 +684,6 @@ async def _find_active_asset_extract_task(
         db,
         relation_type=ASSET_EXTRACTION_RELATION_TYPE,
         relation_entity_id=project_id,
-    )
-
-
-async def _find_active_asset_bind_task(
-    db: AsyncSession,
-    *,
-    chapter_id: str,
-) -> GenerationTask | None:
-    return await _find_active_task(
-        db,
-        relation_type=ASSET_BINDING_RELATION_TYPE,
-        relation_entity_id=chapter_id,
     )
 
 
@@ -776,66 +751,6 @@ async def create_asset_extract_task(
     )
 
 
-async def create_asset_bind_task(
-    db: AsyncSession,
-    *,
-    chapter_id: str,
-    script_division_json: str,
-    asset_list_json: str,
-    write_to_db: bool = False,
-) -> AsyncTaskCreateResult:
-    """Create a shot-level asset binding task.
-
-    Phase 3: consumes a division result + an existing asset list and binds assets
-    to shots. ``write_to_db`` is kept for field symmetry; the worker always
-    persists bindings when ``chapter_id`` is present.
-    """
-    chapter_id = pick_bind_relation_entity_id(chapter_id=chapter_id)
-
-    existing = await _find_active_asset_bind_task(db, chapter_id=chapter_id)
-    if existing is not None:
-        status_value = existing.status.value if hasattr(existing.status, "value") else str(existing.status)
-        return AsyncTaskCreateResult(
-            task_id=existing.id,
-            status=TaskStatus(status_value),
-            reused=True,
-            relation_type=ASSET_BINDING_RELATION_TYPE,
-            relation_entity_id=chapter_id,
-        )
-
-    store = SqlAlchemyTaskStore(db)
-    tm = TaskManager(store=store, strategies={})
-    run_args = {
-        "chapter_id": chapter_id,
-        "script_division_json": script_division_json,
-        "asset_list_json": asset_list_json,
-        "write_to_db": bool(write_to_db),
-    }
-    task_record = await tm.create(
-        task=_CreateOnlyTask(),
-        mode=DeliveryMode.async_polling,
-        task_kind=SCRIPT_ASSET_BIND_TASK_KIND,
-        run_args=run_args,
-    )
-    db.add(
-        GenerationTaskLink(
-            task_id=task_record.id,
-            resource_type="task_link",
-            relation_type=ASSET_BINDING_RELATION_TYPE,
-            relation_entity_id=chapter_id,
-        )
-    )
-    await db.flush()
-
-    return AsyncTaskCreateResult(
-        task_id=task_record.id,
-        status=task_record.status,
-        reused=False,
-        relation_type=ASSET_BINDING_RELATION_TYPE,
-        relation_entity_id=chapter_id,
-    )
-
-
 def spawn_asset_extract_task(task_id: str) -> None:
     """统一封装后台启动：通过 Celery 执行入口派发 asset-extract 任务。"""
     from app.tasks.execute_task import enqueue_task_execution
@@ -843,8 +758,9 @@ def spawn_asset_extract_task(task_id: str) -> None:
     enqueue_task_execution(task_id)
 
 
-def spawn_asset_bind_task(task_id: str) -> None:
-    """统一封装后台启动：通过 Celery 执行入口派发 asset-bind 任务。"""
-    from app.tasks.execute_task import enqueue_task_execution
-
-    enqueue_task_execution(task_id)
+# === 资产绑定（已废弃） ===
+# bind_assets 全链已移除：分镜输出自带 character_names/scene_name，
+# 绑定在 divide_shots 阶段由 apply_division_result 自动完成。
+# create_asset_bind_task / spawn_asset_bind_task 已连同路由、Agent 工具、
+# worker executor 一起删除。历史 task_kind='script_asset_bind' 任务记录
+# 仍保留在 generation_tasks 表中，仅作为历史数据存在。

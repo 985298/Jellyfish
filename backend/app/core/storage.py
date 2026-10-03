@@ -90,7 +90,14 @@ def _local_root() -> Path:
 
 
 def _local_path(key: str) -> Path:
-    return _local_root() / _normalize_key(key)
+    path = _local_root() / _normalize_key(key)
+    if not path.exists() and "/" in key:
+        parts = key.rsplit("/", 1)
+        if len(parts) == 2:
+            path = _local_root() / _normalize_key(parts[0].replace("/", "_") + "/" + parts[1])
+        if not path.exists():
+            path = _local_root() / _normalize_key(key.replace("/", "_"))
+    return path
 
 
 def _check_s3_available() -> bool:

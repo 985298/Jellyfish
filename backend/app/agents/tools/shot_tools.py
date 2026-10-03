@@ -1,4 +1,4 @@
-"""Shot tools: extract shots, bind assets to shots, query shots."""
+﻿"""Shot tools: extract shots, query shots."""
 
 from __future__ import annotations
 
@@ -20,9 +20,8 @@ from app.models.studio import (
     Shot,
 )
 from app.services.script_processing_tasks import (
-    create_asset_bind_task,
+    AsyncTaskCreateResult,
     create_divide_task,
-    spawn_asset_bind_task,
     spawn_divide_task,
 )
 
@@ -35,7 +34,7 @@ class ExtractShotsInput(BaseModel):
 
 
 class ExtractShotsTool(Tool):
-    name = "extract_shots"
+    name = "divide_shots"
     description = "Divide chapter script into shots (chapter_id from context)"
     input_model = ExtractShotsInput
 
@@ -55,105 +54,6 @@ class ExtractShotsTool(Tool):
             "status": str(result.status),
             "reused": result.reused,
             "chapter_id": ctx.chapter_id,
-        }
-
-
-class BindAssetsInput(BaseModel):
-    """No parameters needed — chapter_id and project_id come from AgentContext."""
-
-
-class BindAssetsTool(Tool):
-    """DEPRECATED: asset binding now done in divide_shots stage, no need to call separately."""
-    name = "bind_assets"
-    description = "Bind existing project assets to shots (chapter_id and project_id from context, no parameters needed)"
-    input_model = BindAssetsInput
-
-    async def execute(self, ctx: AgentContext, **kwargs) -> dict:
-        project_id = ctx.project_id
-        async with async_session_maker() as db:
-            # --- query shots for the chapter (with detail eagerly loaded) ---
-            shots = (
-                await db.execute(
-                    select(Shot)
-                    .where(Shot.chapter_id == ctx.chapter_id)
-                    .options(selectinload(Shot.detail))
-                    .order_by(Shot.index)
-                )
-            ).scalars().all()
-            division = []
-            for shot in shots:
-                item: dict = {
-                    "index": shot.index,
-                    "title": shot.title,
-                    "script_excerpt": shot.script_excerpt,
-                }
-                if shot.detail is not None:
-                    d = shot.detail
-                    item["description"] = d.description
-                    item["camera_shot"] = d.camera_shot
-                    item["angle"] = d.angle
-                    item["movement"] = d.movement
-                    if d.scene_id:
-                        item["scene_id"] = d.scene_id
-                division.append(item)
-
-            # --- query project assets ---
-            characters = (
-                await db.execute(
-                    select(Character).where(Character.project_id == project_id)
-                )
-            ).scalars().all()
-            scenes = (
-                await db.execute(
-                    select(Scene).where(Scene.project_id == project_id)
-                )
-            ).scalars().all()
-            props = (
-                await db.execute(
-                    select(Prop).where(Prop.project_id == project_id)
-                )
-            ).scalars().all()
-            costumes = (
-                await db.execute(
-                    select(Costume).where(Costume.project_id == project_id)
-                )
-            ).scalars().all()
-            asset_list = {
-                "characters": [
-                    {"name": c.name, "description": c.description} for c in characters
-                ],
-                "scenes": [
-                    {"name": s.name, "description": s.description} for s in scenes
-                ],
-                "props": [
-                    {"name": p.name, "description": p.description} for p in props
-                ],
-                "costumes": [
-                    {"name": c.name, "description": c.description} for c in costumes
-                ],
-            }
-
-            # --- create bind task ---
-            result = await create_asset_bind_task(
-                db,
-                chapter_id=ctx.chapter_id,
-                script_division_json=json.dumps(division, ensure_ascii=False),
-                asset_list_json=json.dumps(asset_list, ensure_ascii=False),
-            )
-            await db.commit()
-        spawn_asset_bind_task(result.task_id)
-        return {
-            "task_id": result.task_id,
-            "status": str(result.status),
-            "reused": result.reused,
-            "chapter_id": ctx.chapter_id,
-            "shot_count": len(division),
-            "asset_counts": {
-                "characters": len(characters),
-                "scenes": len(scenes),
-                "props": len(props),
-                "costumes": len(costumes),
-            },
         }
 
 

@@ -81,6 +81,7 @@ export function ActorsTab() {
         page: 1,
         pageSize: 100,
         q: q?.trim() || undefined,
+        projectId,
         order: 'updated_at',
         isDesc: true,
       })
@@ -200,7 +201,7 @@ export function ActorsTab() {
             >
               从资产库关联
             </Button>
-            <Button icon={<PlusOutlined />} onClick={() => navigate('/assets')}>
+            <Button icon={<PlusOutlined />} onClick={() => navigate(`/assets?projectId=${projectId}`)}>
               前往资产管理
             </Button>
           </Space>
@@ -222,7 +223,7 @@ export function ActorsTab() {
               >
                 从资产库关联
               </Button>
-              <Button onClick={() => navigate('/assets')}>前往资产管理</Button>
+              <Button onClick={() => navigate(`/assets?projectId=${projectId}`)}>前往资产管理</Button>
             </Space>
           </Empty>
         ) : (

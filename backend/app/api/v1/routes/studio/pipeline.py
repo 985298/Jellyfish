@@ -44,7 +44,6 @@ async def get_pipeline_status(chapter_id: str, db: AsyncSession = Depends(get_db
         return success_response({
             "stage_asset_extract": "not_started",
             "stage_divide": "not_started",
-            "stage_bind": "not_started",
             "stage_asset_images": "not_started",
             "stage_keyframes": "not_started",
             "stage_videos": "not_started",
@@ -61,14 +60,9 @@ async def get_pipeline_status(chapter_id: str, db: AsyncSession = Depends(get_db
         select(func.count(Character.id)).where(Character.project_id == project_id)
     )).scalar() or 0
 
-    bind_count = (await db.execute(
-        select(func.count(ShotCharacterLink.id)).where(ShotCharacterLink.shot_id.in_(shot_ids))
-    )).scalar() or 0
-
     return success_response({
         "stage_asset_extract": "done" if char_count > 0 else "not_started",
         "stage_divide": "done" if shots else "not_started",
-        "stage_bind": "done" if bind_count > 0 else ("not_started" if shots else "blocked"),
         "stage_extract": "done" if cands else ("not_started" if shots else "blocked"),
         "stage_confirm": "done" if cands and not pending else ("partial" if linked else "not_started"),
         "pending_count": len(pending),
@@ -76,7 +70,6 @@ async def get_pipeline_status(chapter_id: str, db: AsyncSession = Depends(get_db
         "shots_count": len(shots),
         "candidates_count": len(cands),
         "asset_count": char_count,
-        "bind_count": bind_count,
     })
 
 

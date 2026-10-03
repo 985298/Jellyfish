@@ -19,6 +19,7 @@ export type ChapterPreparationState = {
 export function getChapterPreparationState(chapter: Chapter): ChapterPreparationState {
   const hasRawText = !!chapter.rawText?.trim()
   const hasShots = (chapter.storyboardCount ?? 0) > 0
+  const assetDone = chapter.assetStage === 'done' || chapter.assetStage === 'partial'
   if (!hasRawText) {
     return {
       key: 'edit_raw',
@@ -29,12 +30,22 @@ export function getChapterPreparationState(chapter: Chapter): ChapterPreparation
       primaryIcon: <EditOutlined />,
     }
   }
+  if (!assetDone) {
+    return {
+      key: 'extract_shots',
+      text: chapter.assetStage === 'running' ? '资产提取中' : '待提取资产',
+      color: 'gold',
+      hint: '已有章节原文，下一步建议先提取资产（角色/场景/道具）再分镜',
+      primaryAction: '提取资产',
+      primaryIcon: <ScissorOutlined />,
+    }
+  }
   if (!hasShots) {
     return {
       key: 'extract_shots',
       text: '待提取分镜',
       color: 'gold',
-      hint: '已有章节原文，下一步建议先提取分镜',
+      hint: '资产已就绪，下一步建议提取分镜',
       primaryAction: '提取分镜',
       primaryIcon: <ScissorOutlined />,
     }

@@ -29,11 +29,12 @@ type AgentSSEEvent = {
  * character_designer agent does extraction + image generation together).
  */
 const AGENT_STAGE_MAP: Record<string, StageKey[]> = {
-  build_assets: ['asset_extract', 'asset_images'],
-  extract_shots: ['divide'],
-  bind_assets: ['bind_assets'],
-  generate_frames: ['keyframes'],
-  generate_videos: ['videos'],
+ extract_assets: ['asset_extract'],
+   generate_asset_refs: ['asset_images'],
+   divide_shots: ['divide'],
+   generate_keyframes: ['keyframes'],
+ generate_videos: ['videos'],
+ compose_film: ['render'],
 }
 
 const ORCHESTRATE_URL = '/api/v1/agents/orchestrate'

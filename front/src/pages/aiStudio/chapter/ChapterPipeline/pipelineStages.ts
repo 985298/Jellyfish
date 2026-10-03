@@ -12,8 +12,6 @@ import { message } from 'antd'
 import { FilmService } from '../../../../services/generated'
 import type { StageKey, StageOutput, StagePatch } from './types'
 
-const API_BASE = '/api/v1/studio'
-
 /* eslint-disable @typescript-eslint/no-explicit-any */
 // Task result payloads are intentionally typed as `any` because the backend
 // returns free-form dicts (script division JSON, asset lists, render result)
@@ -47,30 +45,6 @@ async function postForTaskId(url: string, body: unknown): Promise<string | null>
     })
     const json = await r.json()
     return json?.data?.task_id ?? json?.data?.id ?? null
-  } catch {
-    return null
-  }
-}
-
-/** Fetch the result payload for a task (best-effort; returns null on failure). */
-async function fetchTaskResult(taskId: string): Promise<any | null> {
-  try {
-    const r = await FilmService.getTaskResultApiV1FilmTasksTaskIdResultGet({ taskId })
-    return (r as any)?.data ?? null
-  } catch {
-    return null
-  }
-}
-
-/** Find the latest succeeded task of a given kind and return its result. */
-async function findSucceededTaskResult(taskKind: string): Promise<any | null> {
-  try {
-    const r = await fetch(`/api/v1/film/tasks?task_kind=${taskKind}&page=1&page_size=5`)
-    const data = (await r.json())?.data
-    const items = data?.items || []
-    const succeeded = items.find((t: any) => t.status === 'succeeded')
-    if (!succeeded) return null
-    return await fetchTaskResult(succeeded.id)
   } catch {
     return null
   }
@@ -236,51 +210,6 @@ async function runDivide(ctx: PipelineCtx): Promise<ExecResult> {
   }
 }
 
-async function runBind(ctx: PipelineCtx): Promise<ExecResult> {
-  const { chapterId } = ctx
-  if (!chapterId) return { ok: false, error: '缺少章节' }
-  ctx.setLoading(true)
-  ctx.resetStageForRun('bind_assets')
-  try {
-    const division = await findSucceededTaskResult('script_divide')
-    if (!division) throw new Error('请先完成分镜提取')
-    const assets = await findSucceededTaskResult('script_asset_extract')
-    if (!assets) throw new Error('请先完成资产提取')
-    const divisionData = division?.result || division
-    const tid = await postForTaskId('/api/v1/script-processing/bind-assets-async', {
-      chapter_id: chapterId,
-      script_division_json: JSON.stringify(divisionData),
-      asset_list_json: JSON.stringify(assets),
-    })
-    if (!tid) throw new Error('No task_id')
-    ctx.rememberTaskId?.('bind_assets', tid)
-    let progress = 5
-    const outcome = await pollOne(ctx, tid, (p) => {
-      progress = Math.max(progress, p)
-      ctx.updateStage('bind_assets', { progress: clamp(progress), status: 'running' })
-    })
-    if (outcome !== 'succeeded') throw new Error(outcome === 'timeout' ? '任务超时' : '任务未成功')
-
-    let bindCount = 0
-    try {
-      const r = await fetch(`${API_BASE}/chapters/${chapterId}/pipeline-status`)
-      const data = (await r.json())?.data || {}
-      bindCount = Number(data?.bind_count ?? 0)
-    } catch {
-      bindCount = 0
-    }
-    const output: StageOutput = { count: bindCount, label: '条绑定' }
-    ctx.updateStage('bind_assets', { status: 'done', progress: 100, output })
-    return { ok: true, output, taskId: tid }
-  } catch (e: any) {
-    const error = e?.message || '绑定失败'
-    ctx.updateStage('bind_assets', { status: 'failed', error })
-    return { ok: false, error, taskId: null }
-  } finally {
-    ctx.setLoading(false)
-  }
-}
-
 async function runKeyframes(ctx: PipelineCtx): Promise<ExecResult> {
   const { chapterId } = ctx
   if (!chapterId) return { ok: false, error: '缺少章节' }
@@ -362,17 +291,14 @@ async function runVideos(ctx: PipelineCtx): Promise<ExecResult> {
     const taskIds: string[] = []
     for (const shot of shots) {
       try {
-        const vr = await fetch('/api/v1/film/tasks/video', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
+        const vd = await FilmService.createVideoGenerationTaskApiV1FilmTasksVideoPost({
+          requestBody: {
             shot_id: shot.id,
-            reference_mode: 'text_only',
-            ratio: '16:9',
-            prompt: shot.title || 'scene',
-          }),
+            reference_mode: 'first_frame',
+            ratio: '9:16',
+            prompt: '',
+          },
         })
-        const vd = await vr.json()
         if (vd?.data?.task_id) taskIds.push(vd.data.task_id)
       } catch {
         // skip
@@ -487,8 +413,7 @@ export function buildStageRunners(
   return {
     asset_extract: wrap('资产提取', runAssetExtract, 'asset_images'),
     asset_images: wrap('资产图片', runAssetImages, 'divide'),
-    divide: wrap('分镜提取', runDivide, 'bind_assets'),
-    bind_assets: wrap('资产绑定', runBind, 'keyframes'),
+    divide: wrap('分镜提取', runDivide, 'keyframes'),
     keyframes: wrap('帧图生成', runKeyframes, 'videos'),
     videos: wrap('视频生成', runVideos, 'render'),
     render: wrap('章节渲染', runRender),
@@ -500,7 +425,6 @@ export const STAGE_ORDER: StageKey[] = [
   'asset_extract',
   'asset_images',
   'divide',
-  'bind_assets',
   'keyframes',
   'videos',
   'render',

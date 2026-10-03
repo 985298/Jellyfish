@@ -41,8 +41,6 @@ from app.services.common import required_field
 from app.services.script_processing_tasks import (
     create_asset_extract_task,
     spawn_asset_extract_task,
-    create_asset_bind_task,
-    spawn_asset_bind_task,
     create_consistency_task,
     create_costume_info_task,
     create_divide_task,
@@ -940,28 +938,6 @@ class ScriptAssetExtractRequest(BaseModel):
     )
 
 
-class ScriptAssetBindRequest(BaseModel):
-    """Phase 3: 资产-镜头绑定请求体。
-
-    字段名 ``script_division_json`` / ``asset_list_json`` 与网关代理契约一致，
-    网关会直接转发预序列化的 JSON 字符串。
-    """
-
-    chapter_id: str = Field(..., description="章节 ID", min_length=1)
-    script_division_json: str = Field(
-        ...,
-        description="分镜结果 JSON 字符串（ScriptDivisionResult 序列化）",
-    )
-    asset_list_json: str = Field(
-        ...,
-        description="已有资产 JSON 字符串：{characters: [...], scenes: [...], props: [...], costumes: [...]}",
-    )
-    write_to_db: bool = Field(
-        False,
-        description="是否将绑定结果写入数据库（保留字段，当前由 worker 自动落库）",
-    )
-
-
 @router.post(
     "/asset-extract-async",
     response_model=ApiResponse[AsyncTaskCreateRead],
@@ -983,39 +959,6 @@ async def asset_extract_async(
     await db.commit()
     if not task_info.reused:
         spawn_asset_extract_task(task_info.task_id)
-    return success_response(
-        AsyncTaskCreateRead(
-            task_id=task_info.task_id,
-            status=task_info.status,
-            reused=task_info.reused,
-            relation_type=task_info.relation_type,
-            relation_entity_id=task_info.relation_entity_id,
-        )
-    )
-
-
-@router.post(
-    "/bind-assets-async",
-    response_model=ApiResponse[AsyncTaskCreateRead],
-    summary="异步将已有资产绑定到镜头",
-    description=(
-        "给定分镜结果与已有资产列表，由 LLM 为每个镜头分配资产（解析稳定实体 ID），"
-        "不创建新资产。创建任务后立即返回 task_id，前端通过任务状态接口轮询。"
-    ),
-)
-async def bind_assets_async(
-    request: ScriptAssetBindRequest,
-    db: AsyncSession = Depends(get_db),
-) -> ApiResponse[AsyncTaskCreateRead]:
-    task_info = await create_asset_bind_task(
-        db,
-        chapter_id=request.chapter_id,
-        script_division_json=request.script_division_json,
-        asset_list_json=request.asset_list_json,
-    )
-    await db.commit()
-    if not task_info.reused:
-        spawn_asset_bind_task(task_info.task_id)
     return success_response(
         AsyncTaskCreateRead(
             task_id=task_info.task_id,

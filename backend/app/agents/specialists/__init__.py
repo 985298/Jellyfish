@@ -43,8 +43,7 @@ _AGENT_TOOL_NAMES: dict[str, list[str]] = {
     ],
     "storyboard": [
         "get_chapter_script",
-        "extract_shots",
-        "bind_assets",
+        "divide_shots",
         "query_shots",
     ],
     "production": [
@@ -76,7 +75,6 @@ def _build_tool_registry() -> dict[str, Tool]:
     from app.agents.tools.asset_ref_generator import GenerateAssetRefsTool
     from app.agents.tools.composition_tools import ComposeFilmTool, GenerateBgmTool
     from app.agents.tools.shot_tools import (
-        BindAssetsTool,
         ExtractShotsTool,
         QueryShotsTool,
     )
@@ -88,8 +86,7 @@ def _build_tool_registry() -> dict[str, Tool]:
         "query_assets": QueryAssetsTool(),
         "generate_image": GenerateImageTool(),
         "check_asset_status": CheckAssetStatusTool(),
-        "extract_shots": ExtractShotsTool(),
-        "bind_assets": BindAssetsTool(),
+        "divide_shots": ExtractShotsTool(),
         "query_shots": QueryShotsTool(),
         "generate_frame": GenerateFrameTool(),
         "generate_video": GenerateVideoTool(),

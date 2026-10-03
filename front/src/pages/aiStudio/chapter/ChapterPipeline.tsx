@@ -21,40 +21,32 @@ const INITIAL_STAGES: Stage[] = [
   },
   {
     key: 'asset_images',
-    title: '资产图片',
-    desc: '生成角色/场景参考图',
+   title: '资产图片',
+   desc: '生成角色/场景参考图，锁定外貌',
     status: 'not_started',
     progress: 0,
     actionLabel: '执行',
   },
-  {
-    key: 'divide',
-    title: '分镜提取',
-    desc: 'LLM 把剧本拆成镜头',
-    status: 'not_started',
-    progress: 0,
-    actionLabel: '执行',
-  },
-  {
-    key: 'bind_assets',
-    title: '绑定资产',
-    desc: '将已有资产绑定到镜头',
-    status: 'not_started',
-    progress: 0,
-    actionLabel: '执行',
-  },
-  {
-    key: 'keyframes',
-    title: '镜头帧图',
-    desc: '生成关键帧',
+ {
+   key: 'divide',
+   title: '分镜提取',
+   desc: 'LLM 带资产清单拆分镜头（Agnes三段式）',
+   status: 'not_started',
+   progress: 0,
+   actionLabel: '执行',
+ },
+ {
+   key: 'keyframes',
+   title: '镜头帧图',
+   desc: 'img2img 引用资产参考图生成关键帧',
     status: 'not_started',
     progress: 0,
     actionLabel: '执行',
   },
   {
     key: 'videos',
-    title: '视频生成',
-    desc: '生成镜头视频',
+   title: '视频生成',
+   desc: '关键帧做首帧，first_frame 模式生成竖屏视频',
     status: 'not_started',
     progress: 0,
     actionLabel: '执行',
@@ -210,11 +202,11 @@ export default function ChapterPipeline() {
           })}
         </div>
 
-        {stages[0].status === 'done' && stages[3].status === 'done' && (
-          <Result
-            status="info"
-            title="资产已就绪"
-            subTitle="资产已提取并绑定到镜头，可以去镜头页生成帧图和视频"
+       {stages[0].status === 'done' && stages[1].status === 'done' && (
+         <Result
+           status="info"
+           title="资产已就绪"
+           subTitle="资产已提取并生成参考图，可以去镜头页生成帧图和视频"
             extra={[
               projectId ? (
                 <Link to={`/projects/${projectId}?tab=roles`} key="roles">

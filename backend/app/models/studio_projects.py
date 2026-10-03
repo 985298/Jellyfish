@@ -98,6 +98,12 @@ class Chapter(Base, TimestampMixin):
         default=ChapterStatus.draft,
         comment="章节状态",
     )
+    asset_stage: Mapped[str | None] = mapped_column(
+        String(32),
+        nullable=True,
+        default=None,
+        comment="资产阶段状态：not_started/running/done/failed/blocked/partial；由 pipeline-status 推断回填",
+    )
 
     project: Mapped["Project"] = relationship(back_populates="chapters")
     shots: Mapped[list["Shot"]] = relationship(

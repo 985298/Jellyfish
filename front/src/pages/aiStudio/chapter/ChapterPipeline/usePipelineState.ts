@@ -7,9 +7,8 @@ import type { Stage, StageKey, StagePatch } from './types'
 
 type PipelineStatusData = {
   stage_asset_extract?: Stage['status']
-  stage_divide?: Stage['status']
-  stage_bind?: Stage['status']
-  stage_asset_images?: Stage['status']
+ stage_divide?: Stage['status']
+ stage_asset_images?: Stage['status']
   stage_keyframes?: Stage['status']
   stage_videos?: Stage['status']
   shots_count?: number
@@ -17,7 +16,6 @@ type PipelineStatusData = {
   linked_count?: number
   candidates_count?: number
   asset_count?: number
-  bind_count?: number
 }
 
 export type PollHandle = {
@@ -127,15 +125,11 @@ export function usePipelineState(initial: Stage[]) {
         const status = (data.stage_asset_extract as Stage['status']) || s.status
         return { ...s, status }
       }
-      if (s.key === 'divide') {
-        const status = (data.stage_divide as Stage['status']) || s.status
-        return { ...s, status }
-      }
-      if (s.key === 'bind_assets') {
-        const status = (data.stage_bind as Stage['status']) || s.status
-        return { ...s, status }
-      }
-      return s
+     if (s.key === 'divide') {
+       const status = (data.stage_divide as Stage['status']) || s.status
+       return { ...s, status }
+     }
+     return s
     }))
   }, [])
 
