@@ -5,4 +5,4 @@
 /**
  * 章节生产状态。
  */
-export type ChapterStatus = 'draft' | 'shooting' | 'done';
+export type ChapterStatus = 'draft' | 'shooting' | 'partial' | 'done';

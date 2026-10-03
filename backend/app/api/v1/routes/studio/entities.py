@@ -183,6 +183,21 @@ async def delete_entity(entity_type: str, entity_id: str, db: AsyncSession = Dep
 
 
 @router.get(
+    "/{entity_type}/{entity_id}/usage",
+    response_model=ApiResponse[dict[str, Any]],
+    summary="实体被镜头引用统计（B2：删除前影响面提示）",
+)
+async def get_entity_usage(
+    entity_type: str,
+    entity_id: str,
+    db: AsyncSession = Depends(get_db),
+) -> ApiResponse[dict[str, Any]]:
+    service = StudioEntitiesService(db)
+    payload = await service.get_entity_usage(entity_type=entity_type, entity_id=entity_id)
+    return success_response(payload)
+
+
+@router.get(
     "/{entity_type}/{entity_id}/images",
     response_model=ApiResponse[PaginatedData[dict[str, Any]]],
     summary="统一实体图片列表（分页）",

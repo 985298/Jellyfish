@@ -96,6 +96,65 @@ class StudioEntitiesService:
     async def delete_entity(self, *, entity_type: str, entity_id: str) -> None:
         await delete_entity_service(self._db, entity_type=entity_type, entity_id=entity_id)
 
+    async def get_entity_usage(self, *, entity_type: str, entity_id: str) -> dict[str, object]:
+        """统计实体被多少镜头/章节引用（B2：删除前影响面提示）。
+
+        - character：经 ShotCharacterLink 反查 shot_id，再聚合 chapter_id
+        - scene：经 ShotDetail.scene_id 反查 shot_id，再聚合 chapter_id
+        - prop / costume：经 ShotExtractedCandidate（candidate_type + linked_entity_id）反查
+        - actor：当前不直接被镜头引用，返回 0（演员是项目级 casting，不绑镜头）
+        """
+        from sqlalchemy import func, select
+        from app.models.studio import Chapter, Shot, ShotCharacterLink, ShotDetail, ShotExtractedCandidate
+        from app.models.types import ShotCandidateType
+
+        entity_type_norm = entity_type.strip().lower()
+        shot_ids: set[str] = set()
+
+        if entity_type_norm == "character":
+            rows = (
+                await self._db.execute(
+                    select(ShotCharacterLink.shot_id).where(ShotCharacterLink.character_id == entity_id)
+                )
+            ).scalars().all()
+            shot_ids = {str(r) for r in rows}
+        elif entity_type_norm == "scene":
+            rows = (
+                await self._db.execute(
+                    select(ShotDetail.id).where(ShotDetail.scene_id == entity_id)
+                )
+            ).scalars().all()
+            shot_ids = {str(r) for r in rows}
+        elif entity_type_norm in {"prop", "costume"}:
+            cand_type = ShotCandidateType.prop if entity_type_norm == "prop" else ShotCandidateType.costume
+            rows = (
+                await self._db.execute(
+                    select(ShotExtractedCandidate.shot_id).where(
+                        ShotExtractedCandidate.candidate_type == cand_type,
+                        ShotExtractedCandidate.linked_entity_id == entity_id,
+                    )
+                )
+            ).scalars().all()
+            shot_ids = {str(r) for r in rows}
+        else:
+            return {"shot_count": 0, "chapter_count": 0, "shot_ids": []}
+
+        if not shot_ids:
+            return {"shot_count": 0, "chapter_count": 0, "shot_ids": []}
+
+        chapter_rows = (
+            await self._db.execute(
+                select(Shot.chapter_id).where(Shot.id.in_(shot_ids)).distinct()
+            )
+        ).scalars().all()
+        chapter_ids = {str(r) for r in chapter_rows}
+
+        return {
+            "shot_count": len(shot_ids),
+            "chapter_count": len(chapter_ids),
+            "shot_ids": sorted(shot_ids),
+        }
+
     async def list_entity_images(
         self,
         *,

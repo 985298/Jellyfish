@@ -45,6 +45,8 @@ export type Stage = {
 
 export type StagePatch = Partial<Omit<Stage, 'key' | 'title' | 'desc'>>
 
+export type ExecResult = { ok: boolean; output?: StageOutput; error?: string; taskId?: string | null }
+
 /** A single tool invocation recorded by the Agent during a stage. */
 export type AgentToolCall = {
   tool: string

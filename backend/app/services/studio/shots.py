@@ -12,7 +12,9 @@ from app.models.studio import (
     Chapter,
     Shot,
     ShotCandidateStatus,
+    ShotCharacterLink,
     ShotDialogueCandidateStatus,
+    ShotDetail,
     ShotExtractedCandidate,
     ShotExtractedDialogueCandidate,
 )
@@ -177,27 +179,48 @@ async def list_paginated(
     page_size: int,
     allow_fields: set[str],
     project_ids: set[str] | None = None,
+    project_id: str | None = None,
+    scene_id: str | None = None,
+    character_id: str | None = None,
 ) -> ApiResponse[PaginatedData[ShotRead]]:
     """分页查询镜头。
 
     - project_ids 非空时按 ``chapter.project_id ∈ project_ids`` 过滤（用于 Gateway 租户隔离）。
+    - project_id 非空时按项目过滤（跨章节视图，A1）。
+    - scene_id 非空时按 ShotDetail.scene_id 过滤（场景维度筛选）。
+    - character_id 非空时按 ShotCharacterLink.character_id 过滤（角色维度筛选）。
     """
     stmt = select(Shot)
+    needs_chapter_join = project_ids is not None or project_id is not None
+    if needs_chapter_join:
+        stmt = stmt.join(Chapter, Shot.chapter_id == Chapter.id)
     if chapter_id is not None:
         stmt = stmt.where(Shot.chapter_id == chapter_id)
     if project_ids is not None:
-        stmt = stmt.join(Chapter, Shot.chapter_id == Chapter.id).where(
-            Chapter.project_id.in_(project_ids)
+        stmt = stmt.where(Chapter.project_id.in_(project_ids))
+    if project_id is not None:
+        stmt = stmt.where(Chapter.project_id == project_id)
+    if scene_id is not None:
+        stmt = stmt.join(ShotDetail, ShotDetail.id == Shot.id, isouter=True).where(
+            ShotDetail.scene_id == scene_id
         )
+    if character_id is not None:
+        stmt = stmt.join(
+            ShotCharacterLink, ShotCharacterLink.shot_id == Shot.id, isouter=True
+        ).where(ShotCharacterLink.character_id == character_id)
     stmt = apply_keyword_filter(stmt, q=q, fields=[Shot.title, Shot.script_excerpt])
-    stmt = apply_order(
-        stmt,
-        model=Shot,
-        order=order,
-        is_desc=is_desc,
-        allow_fields=allow_fields,
-        default="index",
-    )
+    # 跨章节视图按"章节序号 → 镜头序号"排序；章节内按镜头序号（apply_order 默认）
+    if project_id is not None or project_ids is not None:
+        stmt = stmt.order_by(Chapter.index, Shot.index)
+    else:
+        stmt = apply_order(
+            stmt,
+            model=Shot,
+            order=order,
+            is_desc=is_desc,
+            allow_fields=allow_fields,
+            default="index",
+        )
     items, total = await paginate(db, stmt=stmt, page=page, page_size=page_size)
     return paginated_response(
         await build_shot_reads(db, shots=items),

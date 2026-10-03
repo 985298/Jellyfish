@@ -192,6 +192,30 @@ export class StudioEntitiesService {
         });
     }
     /**
+     * 实体被镜头引用统计（B2：删除前影响面提示）
+     * @returns ApiResponse_dict_str__Any__ Successful Response
+     * @throws ApiError
+     */
+    public static getEntityUsageApiV1StudioEntitiesEntityTypeEntityIdUsageGet({
+        entityType,
+        entityId,
+    }: {
+        entityType: string,
+        entityId: string,
+    }): CancelablePromise<ApiResponse_dict_str__Any__> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/studio/entities/{entity_type}/{entity_id}/usage',
+            path: {
+                'entity_type': entityType,
+                'entity_id': entityId,
+            },
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
      * 统一实体图片列表（分页）
      * @returns ApiResponse_PaginatedData_dict_str__Any___ Successful Response
      * @throws ApiError

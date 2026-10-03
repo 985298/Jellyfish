@@ -119,6 +119,9 @@ FRAME_IMAGE_ORDER_FIELDS = {"id", "frame_type", "created_at", "updated_at"}
 async def list_shots(
     db: AsyncSession = Depends(get_db),
     chapter_id: str | None = Query(None, description="按章节过滤"),
+    project_id: str | None = Query(None, description="按项目过滤（跨章节视图）"),
+    scene_id: str | None = Query(None, description="按场景过滤（ShotDetail.scene_id）"),
+    character_id: str | None = Query(None, description="按角色过滤（ShotCharacterLink.character_id）"),
     q: str | None = Query(None, description="关键字，过滤 title/script_excerpt"),
     order: str | None = Query(None),
     is_desc: bool = Query(False),
@@ -134,6 +137,9 @@ async def list_shots(
         page=page,
         page_size=page_size,
         allow_fields=SHOT_ORDER_FIELDS,
+        project_id=project_id,
+        scene_id=scene_id,
+        character_id=character_id,
     )
 
 

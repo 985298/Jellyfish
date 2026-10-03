@@ -32,6 +32,9 @@ export class StudioShotsService {
      */
     public static listShotsApiV1StudioShotsGet({
         chapterId,
+        projectId,
+        sceneId,
+        characterId,
         q,
         order,
         isDesc = false,
@@ -42,6 +45,18 @@ export class StudioShotsService {
          * 按章节过滤
          */
         chapterId?: (string | null),
+        /**
+         * 按项目过滤（跨章节视图）
+         */
+        projectId?: (string | null),
+        /**
+         * 按场景过滤（ShotDetail.scene_id）
+         */
+        sceneId?: (string | null),
+        /**
+         * 按角色过滤（ShotCharacterLink.character_id）
+         */
+        characterId?: (string | null),
         /**
          * 关键字，过滤 title/script_excerpt
          */
@@ -56,6 +71,9 @@ export class StudioShotsService {
             url: '/api/v1/studio/shots',
             query: {
                 'chapter_id': chapterId,
+                'project_id': projectId,
+                'scene_id': sceneId,
+                'character_id': characterId,
                 'q': q,
                 'order': order,
                 'is_desc': isDesc,

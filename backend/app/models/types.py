@@ -28,6 +28,7 @@ class ChapterStatus(str, Enum):
 
     draft = "draft"
     shooting = "shooting"
+    partial = "partial"  # 部分完成（有失败子项，未达成 done）
     done = "done"
 
 

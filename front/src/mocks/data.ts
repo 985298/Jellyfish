@@ -1,6 +1,6 @@
 export type ProjectStyle = '现实主义' | '科幻' | '古风' | '都市喜剧'
 
-export type ChapterStatus = 'draft' | 'shooting' | 'done'
+export type ChapterStatus = 'draft' | 'shooting' | 'partial' | 'done'
 
 export interface ProjectStats {
   chapters: number

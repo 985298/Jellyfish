@@ -1,4 +1,4 @@
-import { Card, Button, Statistic, Row, Col, Progress, Space, Spin } from 'antd'
+import { Card, Button, Statistic, Row, Col, Progress, Space, Spin, Tag, Tooltip, Grid } from 'antd'
 import {
   CheckCircleOutlined,
   ClockCircleOutlined,
@@ -18,6 +18,32 @@ import {
   type ChapterFlowStats,
   type ProjectFlowStats,
 } from '../projectFlowStats'
+
+const { useBreakpoint } = Grid
+
+// 章节甘特图阶段映射（D3：状态映射 + 项目级甘特图）
+// 每个阶段对应一种颜色，6 段彩色横条；移动端降级为文字列表
+const STAGE_SEGMENTS = [
+  { key: 'asset_extract', label: '资产', color: '#6366f1' },
+  { key: 'asset_images', label: '图片', color: '#8b5cf6' },
+  { key: 'divide', label: '分镜', color: '#a855f7' },
+  { key: 'keyframes', label: '帧图', color: '#ec4899' },
+  { key: 'videos', label: '视频', color: '#f59e0b' },
+  { key: 'render', label: '渲染', color: '#10b981' },
+] as const
+
+// 章节状态 → 推进到的阶段编号（0=未开始, 1=资产提取, ..., 6=渲染完成）
+function getChapterStageProgress(chapter: { status?: string; assetStage?: string | null; storyboardCount?: number }): number {
+  if (chapter.status === 'done') return 6
+  if (chapter.status === 'shooting') return 5
+  if (!chapter.assetStage || chapter.assetStage === 'not_started') return 0
+  if (chapter.assetStage === 'running') return 1
+  if (chapter.assetStage === 'failed' || chapter.assetStage === 'blocked') return 1
+  // assetStage done/partial + 无分镜 → 2（资产完成，待分镜）
+  if (!(chapter.storyboardCount && chapter.storyboardCount > 0)) return 2
+  // 有分镜 → 至少推进到 3（分镜完成）；实际帧图/视频进度需更细数据，此处保守返回 3
+  return 3
+}
 
 export function DashboardTab({ onSelectTab }: { onSelectTab: (tab: TabKey) => void }) {
   const navigate = useNavigate()
@@ -110,6 +136,9 @@ export function DashboardTab({ onSelectTab }: { onSelectTab: (tab: TabKey) => vo
   const topGeneratingChapter = [...chapterFlowStats].sort((a, b) => b.generatingShots - a.generatingShots)[0]
   const topReadyChapter = [...chapterFlowStats].sort((a, b) => b.readyShots - a.readyShots)[0]
 
+  const screens = useBreakpoint()
+  const isMobile = !screens.md
+
   const handleRecommendedAction = () => {
     if (!projectId) return
     if (!recommendedChapter || !recommendedState) {
@@ -192,6 +221,76 @@ export function DashboardTab({ onSelectTab }: { onSelectTab: (tab: TabKey) => vo
             </Button>
           </Space>
         </div>
+      </Card>
+
+      <Card title="章节进度甘特图" size="small" extra={
+        <Space size="small">
+          {STAGE_SEGMENTS.map((seg) => (
+            <Tag key={seg.key} color={seg.color} style={{ fontSize: 11 }}>{seg.label}</Tag>
+          ))}
+        </Space>
+      }>
+        {chapters.length === 0 ? (
+          <div className="text-gray-500 py-4 text-center">暂无章节</div>
+        ) : isMobile ? (
+          // 移动端降级：列表视图
+          <div className="space-y-2">
+            {chaptersByIndex.slice(0, 10).map((ch) => {
+              const stage = getChapterStageProgress(ch)
+              return (
+                <div key={ch.id} className="flex items-center justify-between gap-2 py-1">
+                  <span className="text-sm truncate">第{ch.index}章 · {ch.title || '未命名'}</span>
+                  <Tag color={ch.status === 'done' ? 'success' : ch.status === 'partial' ? 'warning' : 'default'}>
+                    {stage === 6 ? '已完成' : stage === 0 ? '未开始' : `卡在${STAGE_SEGMENTS[stage - 1]?.label ?? ''}阶段`}
+                  </Tag>
+                </div>
+              )
+            })}
+          </div>
+        ) : (
+          // 桌面端：甘特图（每行一章，6 段彩色横条）
+          <div className="space-y-1">
+            {chaptersByIndex.slice(0, 30).map((ch) => {
+              const stage = getChapterStageProgress(ch)
+              const isPartial = ch.status === 'partial'
+              const onClick = () => projectId && navigate(getChapterStudioPath(projectId, ch.id))
+              return (
+                <div key={ch.id} className="flex items-center gap-2 py-1 hover:bg-gray-50 rounded cursor-pointer" onClick={onClick}>
+                  <div className="w-32 shrink-0 truncate text-xs">
+                    第{ch.index}章 · {ch.title || '未命名'}
+                  </div>
+                  <div className="flex-1 flex gap-0.5">
+                    {STAGE_SEGMENTS.map((seg, i) => {
+                      const segDone = i < stage
+                      const segPartial = isPartial && i === stage - 1
+                      return (
+                        <Tooltip key={seg.key} title={`${seg.label}：${segDone ? (segPartial ? '部分完成' : '完成') : '未开始'}`}>
+                          <div
+                            style={{
+                              flex: 1,
+                              height: 18,
+                              borderRadius: 3,
+                              background: segDone ? (segPartial ? `${seg.color}88` : seg.color) : '#f3f4f6',
+                              border: `1px solid ${segDone ? seg.color : '#e5e7eb'}`,
+                            }}
+                          />
+                        </Tooltip>
+                      )
+                    })}
+                  </div>
+                  <div className="w-24 shrink-0 text-right">
+                    <Tag color={ch.status === 'done' ? 'success' : ch.status === 'partial' ? 'warning' : 'default'} style={{ fontSize: 11 }}>
+                      {stage === 6 ? '完成' : stage === 0 ? '未开始' : `${stage}/6`}
+                    </Tag>
+                  </div>
+                </div>
+              )
+            })}
+            {chaptersByIndex.length > 30 ? (
+              <div className="text-center text-xs text-gray-500 pt-2">仅显示前 30 章，共 {chaptersByIndex.length} 章</div>
+            ) : null}
+          </div>
+        )}
       </Card>
 
       <Row gutter={[16, 16]}>

@@ -11,6 +11,7 @@ import { Link, useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { TAB_CONFIG, TAB_GROUPS, type TabKey, isTabKey, DEFAULT_TAB } from './constants'
 import { DashboardTab } from './tabs/DashboardTab'
 import { ChaptersTab } from './tabs/ChaptersTab'
+import { AllShotsTab } from './tabs/AllShotsTab'
 import { ActorsTab } from './tabs/ActorsTab'
 import { RolesTab } from './tabs/RolesTab'
 import { ScenesTab } from './tabs/ScenesTab'
@@ -249,6 +250,7 @@ const ProjectWorkbench: React.FC = () => {
 
         {activeTab === 'chapters' && <ChaptersTab />}
 
+        {activeTab === 'all_shots' && <AllShotsTab />}
         {activeTab === 'actors' && <ActorsTab />}
         {activeTab === 'roles' && <RolesTab />}
         {activeTab === 'scenes' && <ScenesTab />}

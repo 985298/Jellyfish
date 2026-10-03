@@ -10,6 +10,7 @@ import {
   type StudioAssetLike,
 } from '../components/StudioAssetTypeFormModal'
 import { useBatchAssetImageGeneration } from '../hooks/useBatchAssetImageGeneration'
+import { StudioEntitiesService } from '../../../../services/generated'
 
 export type { StudioAssetLike }
 
@@ -235,10 +236,25 @@ export function AssetTypeTab({
     setFromShotCreateContext(null)
   }
 
-  const handleDelete = (asset: StudioAssetLike) => {
+  const handleDelete = async (asset: StudioAssetLike) => {
+    let usage: { shot_count?: number; chapter_count?: number } | null = null
+    try {
+      const res = await StudioEntitiesService.getEntityUsageApiV1StudioEntitiesEntityTypeEntityIdUsageGet({
+        entityType: tabKey,
+        entityId: asset.id,
+      })
+      usage = res.data ?? null
+    } catch {
+      // 引用数查询失败不阻塞删除流程
+    }
+    const shotCount = usage?.shot_count ?? 0
+    const chapterCount = usage?.chapter_count ?? 0
     Modal.confirm({
       title: `删除${label}资产？`,
-      content: `将删除「${asset.name}」。`,
+      content:
+        shotCount > 0
+          ? `「${asset.name}」被 ${shotCount} 个镜头引用（来自 ${chapterCount} 个章节）。删除后这些镜头的关联将失效，确认删除？`
+          : `将删除「${asset.name}」，未被任何镜头引用。`,
       okText: '删除',
       cancelText: '取消',
       okButtonProps: { danger: true },
