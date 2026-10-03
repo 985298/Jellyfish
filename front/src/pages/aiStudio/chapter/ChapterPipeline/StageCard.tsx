@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { Button, Progress, Tag, Tooltip } from 'antd'
+import { Button, Progress, Tag, Tooltip, Modal, Empty, Spin } from 'antd'
 import {
   CheckCircleOutlined,
   ClockCircleOutlined,
@@ -7,6 +7,7 @@ import {
   PlayCircleOutlined,
   ReloadOutlined,
 } from '@ant-design/icons'
+import { useState, useCallback, useEffect } from 'react'
 import type { Stage, StageKey } from './types'
 
 const STATUS_META: Record<Stage['status'], { color: string; text: string }> = {
@@ -18,6 +19,35 @@ const STATUS_META: Record<Stage['status'], { color: string; text: string }> = {
   failed: { color: 'red', text: '失败' },
 }
 
+// U6：每阶段产出详情加载器（按 stage.key 拉对应实体列表）
+type DetailItem = { id: string; name: string; description?: string; thumbnail?: string | null }
+
+async function loadStageDetails(stageKey: StageKey, projectId?: string, chapterId?: string): Promise<{ items: DetailItem[]; label: string }> {
+  if (!projectId) return { items: [], label: '' }
+  if (stageKey === 'asset_extract' || stageKey === 'asset_images') {
+    const { StudioEntitiesService } = await import('../../../../services/generated')
+    const [charRes, sceneRes] = await Promise.all([
+      StudioEntitiesService.listEntitiesApiV1StudioEntitiesEntityTypeGet({ entityType: 'character', projectId, page: 1, pageSize: 50 }),
+      StudioEntitiesService.listEntitiesApiV1StudioEntitiesEntityTypeGet({ entityType: 'scene', projectId, page: 1, pageSize: 50 }),
+    ])
+    const chars = ((charRes.data?.items ?? []) as Array<{ id: string; name: string; description?: string; thumbnail?: string | null }>).map((c) => ({ id: c.id, name: c.name, description: c.description, thumbnail: c.thumbnail }))
+    const scenes = ((sceneRes.data?.items ?? []) as Array<{ id: string; name: string; description?: string; thumbnail?: string | null }>).map((s) => ({ id: s.id, name: s.name, description: s.description, thumbnail: s.thumbnail }))
+    return { items: [...chars, ...scenes], label: '资产（角色 + 场景）' }
+  }
+  if (stageKey === 'divide' || stageKey === 'keyframes' || stageKey === 'videos' || stageKey === 'render') {
+    if (!chapterId) return { items: [], label: '' }
+    const { StudioShotsService } = await import('../../../../services/generated')
+    const res = await StudioShotsService.listShotsApiV1StudioShotsGet({ chapterId, page: 1, pageSize: 50 })
+    const items = ((res.data?.items ?? []) as Array<{ id: string; title?: string; script_excerpt?: string; status?: string }>).map((s) => ({
+      id: s.id,
+      name: `#${s.title || '镜头'} (${s.status || '—'})`,
+      description: s.script_excerpt,
+    }))
+    return { items, label: stageKey === 'divide' ? '分镜' : stageKey === 'keyframes' ? '帧图' : stageKey === 'videos' ? '视频' : '渲染结果' }
+  }
+  return { items: [], label: '' }
+}
+
 export type StageCardProps = {
   stage: Stage
   index: number
@@ -25,9 +55,11 @@ export type StageCardProps = {
   busy: boolean
   externalLink?: ReactNode
   onRun: (key: StageKey) => void
+  projectId?: string
+  chapterId?: string
 }
 
-export function StageCard({ stage, index, canRun, busy, externalLink, onRun }: StageCardProps) {
+export function StageCard({ stage, index, canRun, busy, externalLink, onRun, projectId, chapterId }: StageCardProps) {
   const meta = STATUS_META[stage.status] || STATUS_META.not_started
   const isRunning = stage.status === 'running'
   const isDone = stage.status === 'done'
@@ -39,6 +71,31 @@ export function StageCard({ stage, index, canRun, busy, externalLink, onRun }: S
       ? `产出 ${output.count ?? 0}/${output.total} ${output.label || ''}`.trim()
       : `产出 ${output.count ?? 0} ${output.label || ''}`.trim()
     : null
+
+  // U6：产出详情抽屉
+  const [detailOpen, setDetailOpen] = useState(false)
+  const [detailLoading, setDetailLoading] = useState(false)
+  const [detailItems, setDetailItems] = useState<DetailItem[]>([])
+  const [detailLabel, setDetailLabel] = useState('')
+  const openDetail = useCallback(async () => {
+    setDetailOpen(true)
+    setDetailLoading(true)
+    try {
+      const { items, label } = await loadStageDetails(stage.key, projectId, chapterId)
+      setDetailItems(items)
+      setDetailLabel(label)
+    } catch {
+      setDetailItems([])
+    } finally {
+      setDetailLoading(false)
+    }
+  }, [stage.key, projectId, chapterId])
+  useEffect(() => {
+    if (!detailOpen) {
+      setDetailItems([])
+      setDetailLabel('')
+    }
+  }, [detailOpen])
 
   return (
     <div className="flex items-center justify-between p-3 rounded-lg border border-gray-200">
@@ -59,7 +116,14 @@ export function StageCard({ stage, index, canRun, busy, externalLink, onRun }: S
             <div className="flex items-center gap-2 flex-wrap">
               <span className="font-medium text-sm">{index + 1}. {stage.title}</span>
               <Tag color={meta.color}>{meta.text}</Tag>
-              {outputText && <span className="text-xs text-gray-500">{outputText}</span>}
+              {outputText && (
+                <a
+                  className="text-xs text-blue-500 hover:underline cursor-pointer"
+                  onClick={(e) => { e.stopPropagation(); void openDetail() }}
+                >
+                  {outputText}
+                </a>
+              )}
               {output?.extra && <span className="text-xs text-orange-500">{output.extra}</span>}
               {output?.url && (
                 <a href={output.url} target="_blank" rel="noreferrer" className="text-xs text-blue-500">
@@ -125,6 +189,31 @@ export function StageCard({ stage, index, canRun, busy, externalLink, onRun }: S
           </Button>
         ) : null}
       </div>
+
+      <Modal
+        title={`${stage.title} · 产出详情`}
+        open={detailOpen}
+        onCancel={() => setDetailOpen(false)}
+        footer={null}
+        width={560}
+      >
+        {detailLoading ? (
+          <div className="flex justify-center py-8"><Spin tip="加载中…" /></div>
+        ) : detailItems.length === 0 ? (
+          <Empty description={`暂无${detailLabel || '产出'}`} />
+        ) : (
+          <div className="space-y-2 max-h-96 overflow-y-auto">
+            {detailItems.map((item) => (
+              <div key={item.id} className="p-2 rounded border border-gray-100 hover:bg-gray-50">
+                <div className="font-medium text-sm truncate">{item.name}</div>
+                {item.description ? (
+                  <div className="text-xs text-gray-500 mt-0.5 line-clamp-2">{item.description}</div>
+                ) : null}
+              </div>
+            ))}
+          </div>
+        )}
+      </Modal>
     </div>
   )
 }

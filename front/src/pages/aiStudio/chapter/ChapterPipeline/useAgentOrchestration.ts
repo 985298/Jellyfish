@@ -72,6 +72,7 @@ export type OrchestrationCallbacks = {
   resetAllStages: () => void
   onComplete: () => void
   onError: (msg: string) => void
+  onReconnect?: (attempt: number, max: number) => void
 }
 
 /**
@@ -219,6 +220,8 @@ export function useAgentOrchestration(callbacks: OrchestrationCallbacks) {
       // Backoff before reconnecting.
       if (hadError) {
         reconnectAttempts++
+        // U7：第一次断连就给用户感知，不再静默转圈
+        cb.onReconnect?.(reconnectAttempts, MAX_RECONNECT)
         if (reconnectAttempts > MAX_RECONNECT) {
           cb.onError('SSE 连接断开，已达到最大重连次数')
           break

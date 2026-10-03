@@ -84,11 +84,18 @@ export default function ChapterPipeline() {
 
   const { stages, updateStage, resetStageForRun, resetAllStages, hydrateFromPipelineStatus } = usePipelineState(INITIAL_STAGES)
   const { poll } = useTaskPolling()
+  const [sseReconnectInfo, setSseReconnectInfo] = useState<{ attempt: number; max: number } | null>(null)
   const { orchestrate, isOrchestrating } = useAgentOrchestration({
     updateStage,
     resetAllStages,
-    onComplete: () => message.success('一键制作完成'),
-    onError: (msg: string) => message.error(msg),
+    onComplete: () => { message.success('一键制作完成'); setSseReconnectInfo(null) },
+    onError: (msg: string) => { message.error(msg); setSseReconnectInfo(null) },
+    onReconnect: (attempt: number, max: number) => {
+      setSseReconnectInfo({ attempt, max })
+      if (attempt === 1) {
+        message.warning({ content: `网络断开，正在重连（${attempt}/${max}）...`, key: 'sse-reconnect', duration: 0 })
+      }
+    },
   })
 
   const loadStatus = useCallback(async () => {
@@ -254,6 +261,15 @@ export default function ChapterPipeline() {
         </Space>
       </div>
 
+      {sseReconnectInfo ? (
+        <Card size="small" style={{ marginBottom: 12, borderColor: '#ffd591', background: '#fffbe6' }}>
+          <Space>
+            <Tag color="orange">网络断开</Tag>
+            <span className="text-sm">正在重连 SSE（{sseReconnectInfo.attempt}/{sseReconnectInfo.max}）... 已收到的阶段状态保留可见</span>
+          </Space>
+        </Card>
+      ) : null}
+
       {chainPausedAt ? (
         <Card size="small" style={{ marginBottom: 12, borderColor: '#ffccc7', background: '#fff2f0' }}>
           <Space>
@@ -313,6 +329,8 @@ export default function ChapterPipeline() {
                 busy={busy}
                 externalLink={externalLink}
                 onRun={(k) => void runStage(k)}
+                projectId={projectId}
+                chapterId={chapterId}
               />
             )
           })}

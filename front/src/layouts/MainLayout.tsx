@@ -1,5 +1,5 @@
-import React, { useMemo } from 'react'
-import { Layout, Menu, theme, Dropdown, Space, Avatar, Select, Breadcrumb } from 'antd'
+import React, { useMemo, useEffect, useState, useCallback } from 'react'
+import { Layout, Menu, theme, Dropdown, Space, Avatar, Select, Breadcrumb, Modal, Input, Spin, Empty, Tooltip } from 'antd'
 import {
   MenuFoldOutlined,
   MenuUnfoldOutlined,
@@ -9,12 +9,14 @@ import {
   PictureOutlined,
   FileTextOutlined,
   ApiOutlined,
+  SearchOutlined,
 } from '@ant-design/icons'
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useAppStore } from '../store/useAppStore'
 import { useTranslation } from 'react-i18next'
 import { TaskCenter } from '../pages/aiStudio/components/TaskCenter'
 import { TaskRuntimeProvider } from '../pages/aiStudio/components/TaskRuntimeProvider'
+import { StudioProjectsService, StudioChaptersService, StudioEntitiesService } from '../services/generated'
 
 const { Header, Sider, Content } = Layout
 
@@ -145,6 +147,74 @@ const MainLayout: React.FC = () => {
     },
   ]
 
+  // U11：全局搜索（Cmd+K / Ctrl+K）
+  const [searchOpen, setSearchOpen] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searchLoading, setSearchLoading] = useState(false)
+  const [searchResults, setSearchResults] = useState<Array<{ kind: 'project' | 'chapter' | 'shot' | 'asset'; id: string; title: string; subtitle?: string; href: string }>>([])
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault()
+        setSearchOpen(true)
+      }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [])
+
+  const runSearch = useCallback(async (q: string) => {
+    const trimmed = q.trim()
+    if (!trimmed) {
+      setSearchResults([])
+      return
+    }
+    setSearchLoading(true)
+    try {
+      const [projRes, chRes, charRes] = await Promise.all([
+        StudioProjectsService.listProjectsApiV1StudioProjectsGet({ q: trimmed, page: 1, pageSize: 5 }).catch(() => null),
+        StudioChaptersService.listChaptersApiV1StudioChaptersGet({ q: trimmed, page: 1, pageSize: 5 }).catch(() => null),
+        StudioEntitiesService.listEntitiesApiV1StudioEntitiesEntityTypeGet({ entityType: 'character', q: trimmed, page: 1, pageSize: 5 }).catch(() => null),
+      ])
+      const results: Array<{ kind: 'project' | 'chapter' | 'shot' | 'asset'; id: string; title: string; subtitle?: string; href: string }> = []
+      const projects = (projRes?.data?.items ?? []) as Array<{ id: string; name?: string }>
+      projects.forEach((p) => {
+        results.push({ kind: 'project', id: p.id, title: p.name || '未命名项目', subtitle: '项目', href: `/projects/${p.id}` })
+      })
+      const chapters = (chRes?.data?.items ?? []) as Array<{ id: string; title?: string; index?: number; project_id?: string }>
+      chapters.forEach((c) => {
+        results.push({
+          kind: 'chapter',
+          id: c.id,
+          title: `第${c.index ?? '?'}章 · ${c.title || '未命名'}`,
+          subtitle: '章节',
+          href: `/projects/${c.project_id}/chapters/${c.id}/shots`,
+        })
+      })
+      const chars = (charRes?.data?.items ?? []) as Array<{ id: string; name?: string; project_id?: string }>
+      chars.forEach((c) => {
+        results.push({
+          kind: 'asset',
+          id: c.id,
+          title: c.name || '未命名角色',
+          subtitle: '角色',
+          href: `/projects/${c.project_id}?tab=roles`,
+        })
+      })
+      setSearchResults(results)
+    } catch {
+      setSearchResults([])
+    } finally {
+      setSearchLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    const t = setTimeout(() => void runSearch(searchQuery), 300)
+    return () => clearTimeout(t)
+  }, [searchQuery, runSearch])
+
   return (
     <Layout
       style={{
@@ -222,6 +292,14 @@ const MainLayout: React.FC = () => {
           </Space>
 
           <Space size="middle">
+            <Tooltip title="全局搜索 (Cmd+K)">
+              <span
+                className="cursor-pointer text-xl shrink-0"
+                onClick={() => setSearchOpen(true)}
+              >
+                <SearchOutlined />
+              </span>
+            </Tooltip>
             <Select
               size="small"
               value={language}
@@ -275,6 +353,49 @@ const MainLayout: React.FC = () => {
           <TaskCenter />
         </TaskRuntimeProvider>
       </Layout>
+
+      <Modal
+        title="全局搜索"
+        open={searchOpen}
+        onCancel={() => { setSearchOpen(false); setSearchQuery('') }}
+        footer={null}
+        width={560}
+      >
+        <Input
+          autoFocus
+          placeholder="搜索项目 / 章节 / 角色... (Cmd+K 唤起)"
+          prefix={<SearchOutlined />}
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          allowClear
+        />
+        <div className="mt-3 max-h-96 overflow-y-auto">
+          {searchLoading ? (
+            <div className="flex justify-center py-8"><Spin tip="搜索中..." /></div>
+          ) : searchResults.length === 0 ? (
+            <Empty description={searchQuery ? '无匹配结果' : '输入关键字搜索项目/章节/角色'} image={Empty.PRESENTED_IMAGE_SIMPLE} />
+          ) : (
+            <div className="space-y-1">
+              {searchResults.map((r) => (
+                <div
+                  key={`${r.kind}-${r.id}`}
+                  className="p-2 rounded hover:bg-blue-50 cursor-pointer flex items-center justify-between"
+                  onClick={() => {
+                    navigate(r.href)
+                    setSearchOpen(false)
+                    setSearchQuery('')
+                  }}
+                >
+                  <div className="min-w-0">
+                    <div className="text-sm truncate">{r.title}</div>
+                    <div className="text-xs text-gray-400">{r.subtitle}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </Modal>
     </Layout>
   )
 }
