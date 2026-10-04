@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
-import { Button, Card, Progress, Result, Segmented, Space, Tag, Tooltip, message } from 'antd'
+import { Button, Card, Progress, Result, Space, Tag, Tooltip, message } from 'antd'
 import { ThunderboltOutlined, CloseCircleOutlined } from '@ant-design/icons'
 import { StudioChaptersService } from '../../../services/generated'
 import { useParams, Link } from 'react-router-dom'
@@ -84,11 +84,11 @@ type RunPolicy = 'chain' | 'step'
 
 export default function ChapterPipeline() {
   const { projectId, chapterId } = useParams<{ projectId?: string; chapterId?: string }>()
-  const [runPolicy, setRunPolicy] = useState<RunPolicy>('step')
+  const [runPolicy] = useState<RunPolicy>('step')
   /** fan-out 阶段（资产图片/帧图/视频）每批提交的任务数。
    *  默认 999 = 一次性全部提交，用后端自己的并发控制排队。
    *  用户可切到 1/3/5/10 做手动分批（便于中止与失败定位）。 */
-  const [batchSize, setBatchSize] = useState<number>(999)
+  const [batchSize] = useState<number>(999)
   const [loading, setLoading] = useState(false)
   const [chapterTitle, setChapterTitle] = useState('')
   const [scriptText, setScriptText] = useState('')
@@ -298,68 +298,56 @@ export default function ChapterPipeline() {
 
   return (
     <div className="p-6 max-w-4xl mx-auto">
-      <div className="mb-4 flex items-center justify-between">
-        <div>
-          <h2 className="text-lg font-semibold">一键制作流程</h2>
-          <p className="text-sm text-gray-500">{chapterTitle ? `章节: ${chapterTitle}` : ''}</p>
-        </div>
-        <Space>
-          <Tooltip title="链式跑通：执行某阶段成功后自动往下跑；单步执行：只跑你点的那一个阶段">
-            <Segmented
-              value={runPolicy}
-              onChange={(v) => setRunPolicy(v as RunPolicy)}
-              options={[
-                { label: '链式跑通', value: 'chain' },
-                { label: '单步执行', value: 'step' },
-              ]}
-            />
-          </Tooltip>
-          <Tooltip title="资产图片/帧图/视频会按此数量分批提交并批内并发轮询。默认「全部」=一次性提交全部任务，用后端自己的并发控制排队">
-            <Space size={4}>
-              <span className="text-xs text-gray-500">每批</span>
-              <Segmented
-                value={batchSize >= 999 ? 999 : batchSize}
-                onChange={(v) => setBatchSize(Number(v))}
-                options={[
-                  { label: '全部', value: 999 },
-                  { label: '10', value: 10 },
-                  { label: '5', value: 5 },
-                  { label: '3', value: 3 },
-                  { label: '1', value: 1 },
-                ]}
-              />
-            </Space>
-          </Tooltip>
-          {chainRunning ? (
-            <Button danger icon={<CloseCircleOutlined />} onClick={stopChain}>
-              停止跑通
-            </Button>
-          ) : null}
-          <Tooltip title="按 6 阶段顺序自动执行；帧图/视频/渲染部分失败自动跳过，资产/分镜失败则暂停">
-            <Button
-              size="large"
-              icon={<ThunderboltOutlined />}
-              loading={chainRunning}
-              disabled={allDone || !projectId || !chapterId || !scriptText || busy}
-              onClick={() => void runChain()}
-            >
-              {allDone ? '已完成' : chainPausedAt ? '继续跑通' : '一键跑通'}
-            </Button>
-          </Tooltip>
-          <Tooltip title="交给 LLM 决策的 Agent 编排（简单章节快速跑）">
-            <Button
-              type="primary"
-              size="large"
-              icon={<ThunderboltOutlined />}
-              loading={isOrchestrating}
-              disabled={allDone || !projectId || !chapterId || !scriptText || busy}
-              onClick={() => void runAll()}
-            >
-              Agent 编排
-            </Button>
-          </Tooltip>
-        </Space>
+    <div className="mb-4 flex items-center justify-between">
+      <div>
+        <h2 className="text-lg font-semibold">一键制作流程</h2>
+        <p className="text-sm text-gray-500">{chapterTitle ? `章节: ${chapterTitle}` : ''}</p>
       </div>
+      <Space>
+        {chainRunning ? (
+          <Button danger icon={<CloseCircleOutlined />} onClick={stopChain}>
+            停止跑通
+          </Button>
+        ) : null}
+        <Tooltip title="按 6 阶段顺序自动执行；帧图/视频/渲染部分失败自动跳过，资产/分镜失败则暂停">
+          <Button
+            size="large"
+            icon={<ThunderboltOutlined />}
+            loading={chainRunning}
+            disabled={allDone || !projectId || !chapterId || !scriptText || busy}
+            onClick={() => void runChain()}
+          >
+            {allDone ? '已完成' : chainPausedAt ? '继续跑通' : '一键制作'}
+          </Button>
+        </Tooltip>
+        <Tooltip title="交给 LLM 决策的 Agent 编排（简单章节快速跑）">
+          <Button type="text" size="small" loading={isOrchestrating}
+            disabled={allDone || !projectId || !chapterId || !scriptText || busy}
+            onClick={() => void runAll()}>Agent编排</Button>
+        </Tooltip>
+      </Space>
+    </div>
+
+    {/* sticky 6步进度条（一眼看到在哪个阶段，取代策略开关/批次选择器） */}
+    <div className="sticky top-0 z-20 bg-white border-y border-gray-200 py-2 mb-4 -mx-6 px-6">
+      <div className="flex gap-1.5">
+        {stages.map((s, i) => {
+          const cls = s.status === 'done'
+            ? 'bg-green-50 text-green-700 border-green-300'
+            : s.status === 'running' || s.status === 'failed'
+            ? 'bg-blue-500 text-white border-blue-500'
+            : 'bg-gray-50 text-gray-500 border-gray-200'
+          const stText = s.status === 'done' ? '✓完成' : s.status === 'running' ? '进行中' : s.status === 'failed' ? '失败' : '待执行'
+          return (
+            <div key={s.key} className={'flex-1 text-center px-2 py-1.5 rounded border text-xs ' + cls}>
+              <div className="text-[10px] opacity-70">步骤{i + 1}</div>
+              <div className="font-medium">{STAGE_LABELS[s.key]}</div>
+              <div className="text-[10px] opacity-80">{stText}</div>
+            </div>
+          )
+        })}
+      </div>
+    </div>
 
       {sseReconnectInfo ? (
         <Card size="small" style={{ marginBottom: 12, borderColor: '#ffd591', background: '#fffbe6' }}>
