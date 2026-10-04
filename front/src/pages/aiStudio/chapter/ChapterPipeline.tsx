@@ -5,9 +5,15 @@ import { ThunderboltOutlined, CloseCircleOutlined } from '@ant-design/icons'
 import { StudioChaptersService } from '../../../services/generated'
 import { useParams, Link } from 'react-router-dom'
 import { StageCard } from './ChapterPipeline/StageCard'
-import { usePipelineState, useTaskPolling, fetchPipelineStatus } from './ChapterPipeline/usePipelineState'
+import {
+  usePipelineState,
+  useTaskPolling,
+  useTaskPollingMany,
+  fetchPipelineStatus,
+} from './ChapterPipeline/usePipelineState'
 import { useAgentOrchestration } from './ChapterPipeline/useAgentOrchestration'
 import { buildStageRunners, STAGE_ORDER } from './ChapterPipeline/pipelineStages'
+import type { RunOptions } from './ChapterPipeline/pipelineStages'
 import type { ExecResult, Stage, StageKey } from './ChapterPipeline/types'
 
 // 失败恢复策略：可跳过失败（partial 容错推进）vs 必须暂停（后续阶段无法跑）
@@ -79,6 +85,9 @@ type RunPolicy = 'chain' | 'step'
 export default function ChapterPipeline() {
   const { projectId, chapterId } = useParams<{ projectId?: string; chapterId?: string }>()
   const [runPolicy, setRunPolicy] = useState<RunPolicy>('step')
+  /** fan-out 阶段（资产图片/帧图/视频）每批提交的任务数。
+   *  后端并发上限为 4，分批是为了不让几十个任务一次性压上去、也便于中止与失败定位。 */
+  const [batchSize, setBatchSize] = useState<number>(5)
   const [loading, setLoading] = useState(false)
   const [chapterTitle, setChapterTitle] = useState('')
   const [scriptText, setScriptText] = useState('')
@@ -90,6 +99,7 @@ export default function ChapterPipeline() {
 
   const { stages, updateStage, resetStageForRun, resetAllStages, hydrateFromPipelineStatus } = usePipelineState(INITIAL_STAGES)
   const { poll } = useTaskPolling()
+  const { pollMany, cancelMany } = useTaskPollingMany()
   const [sseReconnectInfo, setSseReconnectInfo] = useState<{ attempt: number; max: number } | null>(null)
   const { orchestrate, isOrchestrating } = useAgentOrchestration({
     updateStage,
@@ -137,7 +147,9 @@ export default function ChapterPipeline() {
     rememberTaskIds: (key: StageKey, taskIds: string[]) => {
       stageTaskIdsRef.current[key] = taskIds
     },
-  }), [projectId, chapterId, scriptText, updateStage, resetStageForRun, poll])
+    // 一批任务共用一个定时器并发轮询，替代原来的「跑一项等一项」
+    pollMany,
+  }), [projectId, chapterId, scriptText, updateStage, resetStageForRun, poll, pollMany])
 
   const runners = useMemo(() => buildStageRunners(ctx), [ctx])
 
@@ -146,15 +158,18 @@ export default function ChapterPipeline() {
   runnersRef.current = runners
 
   // 单个阶段的最小执行单元：只跑自己，不牵扯后继阶段
-  const runStage = useCallback((key: StageKey, runOpts?: { onlyIds?: string[] }) => {
-    abortRef.current.delete(key)
-    setRunningStage(key)
-    return runnersRef.current[key](runOpts)
-      .finally(() => {
-        abortRef.current.delete(key)
-        setRunningStage((cur) => (cur === key ? null : cur))
-      })
-  }, [])
+  const runStage = useCallback(
+    (key: StageKey, runOpts?: RunOptions) => {
+      abortRef.current.delete(key)
+      setRunningStage(key)
+      return runnersRef.current[key]({ batchSize, ...runOpts })
+        .finally(() => {
+          abortRef.current.delete(key)
+          setRunningStage((cur) => (cur === key ? null : cur))
+        })
+    },
+    [batchSize],
+  )
 
   // C2：Agent SSE 编排（简单章节快速跑，失败控制不精细）
   const runAll = useCallback(async () => {
@@ -186,7 +201,7 @@ export default function ChapterPipeline() {
     for (const key of STAGE_ORDER.slice(startIdx)) {
       if (chainAbortRef.current) break
       setRunningStage(key)
-      const res: ExecResult = await runnersRef.current[key]()
+      const res: ExecResult = await runnersRef.current[key]({ batchSize })
       setChainLog((prev) => [...prev, { key, ok: res.ok, error: res.error }])
       if (!res.ok) {
         if (PAUSE_STAGES.has(key)) {
@@ -205,7 +220,7 @@ export default function ChapterPipeline() {
     if (!chainAbortRef.current && !lastError) {
       message.success('链式跑通完成')
     }
-  }, [projectId, chapterId, scriptText])
+  }, [projectId, chapterId, scriptText, batchSize])
 
   const runChain = useCallback(() => runChainFrom(STAGE_ORDER[0]), [runChainFrom])
 
@@ -213,6 +228,8 @@ export default function ChapterPipeline() {
   const stopStage = useCallback(async (key: StageKey) => {
     abortRef.current.add(key)
     chainAbortRef.current = true
+    // 立刻掐断共用的轮询定时器，不等下一次 tick（否则中止最慢要等一个轮询间隔）
+    cancelMany()
     const ids = [
       ...(stageTaskIdsRef.current[key] ?? []),
       ...(taskIdRef.current[key] ? [taskIdRef.current[key] as string] : []),
@@ -233,7 +250,7 @@ export default function ChapterPipeline() {
     setRunningStage((cur) => (cur === key ? null : cur))
     chainRunningRef.current = false
     message.info(`「${STAGE_LABELS[key]}」已请求中止${cancelled ? `，已取消 ${cancelled} 个任务` : ''}`)
-  }, [updateStage])
+  }, [updateStage, cancelMany])
 
   const stopChain = useCallback(() => {
     chainAbortRef.current = true
@@ -295,6 +312,21 @@ export default function ChapterPipeline() {
                 { label: '单步执行', value: 'step' },
               ]}
             />
+          </Tooltip>
+          <Tooltip title="资产图片/帧图/视频会按此数量分批提交并批内并发轮询。后端并发上限约 4，数值越大跑得越猛但更容易触发限流">
+            <Space size={4}>
+              <span className="text-xs text-gray-500">每批</span>
+              <Segmented
+                value={batchSize}
+                onChange={(v) => setBatchSize(Number(v))}
+                options={[
+                  { label: '1', value: 1 },
+                  { label: '3', value: 3 },
+                  { label: '5', value: 5 },
+                  { label: '10', value: 10 },
+                ]}
+              />
+            </Space>
           </Tooltip>
           {chainRunning ? (
             <Button danger icon={<CloseCircleOutlined />} onClick={stopChain}>

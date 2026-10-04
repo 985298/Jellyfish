@@ -93,6 +93,113 @@ export function useTaskPolling() {
   return { poll, cancel }
 }
 
+/** 批量轮询：一批任务共用同一个定时器，避免串行 await 拖长总耗时 */
+export type TaskPollEntry = { id: string; label: string; taskId: string }
+export type PollManySnapshot = {
+  completed: number
+  failed: number
+  cancelled: number
+  pending: number
+}
+export type PollManyOutcome = PollManySnapshot & {
+  aborted: boolean
+  timedOut: boolean
+  failedItems: TaskPollEntry[]
+  cancelledItems: TaskPollEntry[]
+}
+
+export function useTaskPollingMany(intervalMs = 3000, maxIters = 100) {
+  const timerRef = useRef<number | null>(null)
+  const cancelRef = useRef<(() => void) | null>(null)
+
+  const clearTimer = useCallback(() => {
+    if (timerRef.current !== null) {
+      window.clearTimeout(timerRef.current)
+      timerRef.current = null
+    }
+  }, [])
+
+  const pollMany = useCallback(
+    (
+      entries: TaskPollEntry[],
+      onProgress?: (snapshot: PollManySnapshot) => void,
+      shouldAbort?: () => boolean,
+    ): Promise<PollManyOutcome> => {
+      clearTimer()
+      let cancelled = false
+      cancelRef.current = () => {
+        cancelled = true
+        clearTimer()
+      }
+
+      const settled = new Map<string, TaskStatus>()
+      const snapshotOf = (): PollManySnapshot => {
+        let completed = 0
+        let failed = 0
+        let cancelledCount = 0
+        let pending = 0
+        for (const entry of entries) {
+          const status = settled.get(entry.taskId)
+          if (!status) pending += 1
+          else if (status === 'succeeded') completed += 1
+          else if (status === 'cancelled') cancelledCount += 1
+          else failed += 1
+        }
+        return { completed, failed, cancelled: cancelledCount, pending }
+      }
+
+      return new Promise<PollManyOutcome>((resolve) => {
+        let iter = 0
+        const done = (aborted: boolean, timedOut: boolean) => {
+          cancelRef.current = null
+          const failedItems = entries.filter((e) => settled.get(e.taskId) === 'failed')
+          const cancelledItems = entries.filter((e) => settled.get(e.taskId) === 'cancelled')
+          resolve({ ...snapshotOf(), aborted, timedOut, failedItems, cancelledItems })
+        }
+
+        const tick = async () => {
+          if (cancelled) return done(true, false)
+          if (shouldAbort?.()) return done(true, false)
+
+          iter += 1
+          const pendingEntries = entries.filter((e) => !settled.has(e.taskId))
+          await Promise.all(
+            pendingEntries.map(async (entry) => {
+              try {
+                const res = await FilmService.getTaskStatusApiV1FilmTasksTaskIdStatusGet({ taskId: entry.taskId })
+                const status = res.data?.status as TaskStatus | undefined
+                if (status && isTerminal(status)) settled.set(entry.taskId, status)
+              } catch {
+                // transient error — retry next tick
+              }
+            }),
+          )
+
+          if (pendingEntries.every((e) => settled.has(e.taskId))) {
+            onProgress?.(snapshotOf())
+            return done(false, false)
+          }
+          if (iter >= maxIters) return done(false, true)
+          onProgress?.(snapshotOf())
+          timerRef.current = window.setTimeout(tick, intervalMs)
+        }
+
+        void tick()
+      })
+    },
+    [clearTimer, intervalMs, maxIters],
+  )
+
+  const cancelMany = useCallback(() => {
+    cancelRef.current?.()
+    cancelRef.current = null
+  }, [])
+
+  useEffect(() => () => cancelRef.current?.(), [])
+
+  return { pollMany, cancelMany }
+}
+
 export function usePipelineState(initial: Stage[]) {
   const [stages, setStages] = useState<Stage[]>(initial)
 
