@@ -314,6 +314,9 @@ class StudioAssetDraft(BaseModel):
     tags: List[str] = Field(default_factory=list, description="标签")
     prompt_template_id: Optional[str] = Field(None, description="提示词模板 ID（可空）")
     view_count: int = Field(1, ge=0, description="计划生成视角图数量")
+    # LLM 在提取服装时常附带 character_name 表示该服装属于哪个角色——
+    # 之前 extra="forbid" 导致整个任务 failed。允许该字段通过，后续落库时按需取用。
+    character_name: Optional[str] = Field(None, description="服装所属角色名（仅 costume 类型时 LLM 可能返回）")
 
 
 class StudioCharacterDraft(BaseModel):
