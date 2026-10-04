@@ -236,6 +236,18 @@ export function usePipelineState(initial: Stage[]) {
        const status = (data.stage_divide as Stage['status']) || s.status
        return { ...s, status }
      }
+      if (s.key === 'asset_images') {
+        const status = (data.stage_asset_images as Stage['status']) || s.status
+        return { ...s, status }
+      }
+      if (s.key === 'keyframes') {
+        const status = (data.stage_keyframes as Stage['status']) || s.status
+        return { ...s, status }
+      }
+      if (s.key === 'videos') {
+        const status = (data.stage_videos as Stage['status']) || s.status
+        return { ...s, status }
+      }
      return s
     }))
   }, [])

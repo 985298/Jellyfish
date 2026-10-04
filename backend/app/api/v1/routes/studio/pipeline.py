@@ -9,10 +9,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.dependencies import get_db
-from app.models.studio_shots import Shot, ShotExtractedCandidate, ShotCandidateStatus
+from app.models.studio_shots import Shot, ShotExtractedCandidate, ShotCandidateStatus, ShotDetail
 from app.models.studio_assets import Character, Scene, Prop, Costume
 from app.models.studio_projects import Chapter
 from app.models.studio_shots import ShotCharacterLink
+from app.models.studio import CharacterImage, ShotFrameImage
 from app.schemas.common import ApiResponse, success_response
 from app.services.studio.entity_crud import create_entity as _create_entity_crud
 from app.services.studio.shot_extracted_candidates import mark_linked_by_name
@@ -60,9 +61,30 @@ async def get_pipeline_status(chapter_id: str, db: AsyncSession = Depends(get_db
         select(func.count(Character.id)).where(Character.project_id == project_id)
     )).scalar() or 0
 
+    ci_count = (await db.execute(
+        select(func.count(CharacterImage.id))
+        .join(Character, CharacterImage.character_id == Character.id)
+        .where(Character.project_id == project_id, CharacterImage.file_id.isnot(None))
+    )).scalar() or 0
+
+    frame_count = (await db.execute(
+        select(func.count(ShotFrameImage.id))
+        .join(ShotDetail, ShotFrameImage.shot_detail_id == ShotDetail.id)
+        .join(Shot, ShotDetail.id == Shot.id)
+        .where(Shot.chapter_id == chapter_id, ShotFrameImage.file_id.isnot(None))
+    )).scalar() or 0
+
+    video_count = (await db.execute(
+        select(func.count(Shot.id))
+        .where(Shot.chapter_id == chapter_id, Shot.generated_video_file_id.isnot(None))
+    )).scalar() or 0
+
     return success_response({
         "stage_asset_extract": "done" if char_count > 0 else "not_started",
         "stage_divide": "done" if shots else "not_started",
+        "stage_asset_images": "done" if ci_count > 0 else "not_started",
+        "stage_keyframes": "done" if frame_count > 0 else ("not_started" if shots else "blocked"),
+        "stage_videos": "done" if video_count > 0 else ("not_started" if shots else "blocked"),
         "stage_extract": "done" if cands else ("not_started" if shots else "blocked"),
         "stage_confirm": "done" if cands and not pending else ("partial" if linked else "not_started"),
         "pending_count": len(pending),
