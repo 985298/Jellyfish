@@ -90,7 +90,7 @@ const MainLayout: React.FC = () => {
         const isLast = i === path.length - 1
         // 章节序号异步解析失败时回退到"章节"，避免阻塞面包屑渲染
         items.push({
-          key: href,
+          key: `chapter-${chapterId}`,
           title: isLast ? <ChapterBreadcrumbLabel chapterId={chapterId} /> : <Link to={href}><ChapterBreadcrumbLabel chapterId={chapterId} /></Link>,
         })
         return
