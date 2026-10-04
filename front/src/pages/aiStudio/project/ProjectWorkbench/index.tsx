@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import { Card, Button, Tabs, Space, Dropdown, Empty } from 'antd'
+import { Card, Button, Space, Dropdown, Empty } from 'antd'
 import type { MenuProps } from 'antd'
 import {
   PlusOutlined,
@@ -183,82 +183,106 @@ const ProjectWorkbench: React.FC = () => {
   }
 
   return (
-    <div className="h-full min-h-0 flex flex-col">
-      <div
-        className="sticky top-0 z-20 bg-white border-b border-gray-200 shadow-sm"
-        style={{ margin: -5, marginBottom: 0, padding: '16px 24px' }}
-      >
-        <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-gray-100">
-          <Tabs
-            activeKey={TAB_GROUPS.find((g) => g.keys.includes(activeTab))?.label ?? activeTab}
-            onChange={(k) => {
-              const group = TAB_GROUPS.find((g) => g.label === k)
-              if (group && group.keys.length > 0) setTabInUrl(group.keys[0])
-            }}
-            size="middle"
-            className="project-workbench-tabs flex-1 min-w-0"
-            items={TAB_GROUPS.map((group) => ({
-              key: group.label,
-              label: group.label,
-              children: (
-                <Tabs
-                  activeKey={activeTab}
-                  onChange={(k) => setTabInUrl(k as TabKey)}
-                  size="small"
-                  items={group.keys
-                    .map((k) => TAB_CONFIG.find((t) => t.key === k))
-                    .filter((t): t is { key: TabKey; label: string; icon: React.ReactNode } => !!t)
-                    .map(({ key, label, icon }) => ({
-                      key,
-                      label: (
-                        <span className="flex items-center gap-1.5">
-                          {icon}
-                          {label}
-                        </span>
-                      ),
-                    }))}
-                />
-              ),
-            }))}
-          />
-          <Space size="small" wrap className="shrink-0">
-            <Button
-              type="primary"
-              icon={primaryCta.icon}
-              onClick={primaryCta.onClick}
-            >
-              {primaryCta.label}
-            </Button>
-            <Button icon={<VideoCameraFilled />} onClick={() => projectId && navigate(getProjectEditorPath(projectId))}>
-              进入后期剪辑
-            </Button>
-            <Dropdown menu={{ items: moreMenuItems }} placement="bottomRight">
-              <Button icon={<EllipsisOutlined />}>更多</Button>
-            </Dropdown>
-          </Space>
+    <div className="h-full min-h-0 flex">
+      {/* 左侧 sidebar：章节速览 + 工具入口 */}
+      <div className="w-56 shrink-0 border-r border-gray-200 bg-gray-50 flex flex-col overflow-y-auto">
+        <div className="p-3 border-b border-gray-200">
+          <Link to="/projects" className="text-sm text-gray-500 hover:text-gray-700 flex items-center gap-1">
+            <ArrowLeftOutlined /> 返回项目列表
+          </Link>
         </div>
-        <div className="mt-2 text-xs text-gray-500">
-          {primaryCta.hint}
+
+        {/* 章节速览（点击进管线，不重复 ChaptersTab） */}
+        <div className="p-3">
+          <div className="text-xs text-gray-400 mb-2 uppercase tracking-wide">章节</div>
+          {chaptersByIndex.length === 0 && (
+            <div className="text-xs text-gray-400">暂无章节</div>
+          )}
+          {chaptersByIndex.slice(0, 8).map((ch) => {
+            const st = getChapterPreparationState(ch)
+            const stText = st.key === 'edit_raw' ? '待原文' : st.key === 'extract_shots' ? '待分镜' : st.key === 'prepare_shots' ? '准备中' : '可拍摄'
+            return (
+              <div
+                key={ch.id}
+                className={"px-2 py-1.5 rounded mb-1 text-xs cursor-pointer hover:bg-gray-200 flex items-center justify-between " + (recommendedChapter && ch.id === recommendedChapter.id ? "bg-blue-50 ring-1 ring-blue-200" : "")}
+                onClick={() => projectId && navigate(getChapterStudioPath(projectId, ch.id))}
+              >
+                <span className="truncate flex-1 min-w-0">第{ch.index}章 {ch.title || ''}</span>
+                <span className="text-gray-400 ml-1 shrink-0">{stText}</span>
+              </div>
+            )
+          })}
+          {chaptersByIndex.length > 8 && (
+            <div className="text-xs text-gray-400 px-2 mt-1">+ {chaptersByIndex.length - 8} 更多（见章节管理）</div>
+          )}
+          <Button size="small" type="dashed" icon={<PlusOutlined />} className="w-full mt-2" onClick={() => setTabInUrl('chapters')}>
+            新建章节
+          </Button>
+        </div>
+
+        {/* 工具入口：TAB_GROUPS 转侧边菜单（功能不丢，从顶部平铺改侧边分组） */}
+        <div className="p-3 border-t border-gray-200 flex-1">
+          <div className="text-xs text-gray-400 mb-2 uppercase tracking-wide">工具</div>
+          {TAB_GROUPS.map((group) => (
+            <div key={group.label} className="mb-2">
+              <div className="text-xs text-gray-400 px-2 mb-1">{group.label}</div>
+              {group.keys.map((k) => {
+                const cfg = TAB_CONFIG.find((t) => t.key === k)
+                if (!cfg) return null
+                return (
+                  <div
+                    key={k}
+                    className={"px-2 py-1.5 rounded mb-0.5 text-sm cursor-pointer flex items-center gap-2 " + (activeTab === k ? "bg-blue-500 text-white" : "hover:bg-gray-200 text-gray-700")}
+                    onClick={() => setTabInUrl(k)}
+                  >
+                    {cfg.icon}
+                    <span>{cfg.label}</span>
+                  </div>
+                )
+              })}
+            </div>
+          ))}
         </div>
       </div>
 
-      <div
-        className="pt-4 animate-fadeIn flex-1 min-h-0 overflow-y-auto"
-        style={{ animation: 'fadeIn 0.25s ease-out' }}
-      >
-        {activeTab === 'dashboard' && <DashboardTab onSelectTab={setTabInUrl} />}
+      {/* 右侧 main：顶部 primaryCta 主进度 + 主体 activeTab 内容 */}
+      <div className="flex-1 min-w-0 flex flex-col">
+        {/* 顶部 sticky：醒目"继续制作"主按钮（复用现有 primaryCta 逻辑） */}
+        <div className="sticky top-0 z-20 bg-white border-b border-gray-200 shadow-sm px-6 py-3">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div className="flex items-center gap-3 flex-1 min-w-0">
+              <Button type="primary" size="large" icon={primaryCta.icon} onClick={primaryCta.onClick}>
+                {primaryCta.label}
+              </Button>
+              <div className="text-xs text-gray-500 truncate">{primaryCta.hint}</div>
+            </div>
+            <Space size="small" wrap className="shrink-0">
+              <Button icon={<VideoCameraFilled />} onClick={() => projectId && navigate(getProjectEditorPath(projectId))}>
+                后期剪辑
+              </Button>
+              <Dropdown menu={{ items: moreMenuItems }} placement="bottomRight">
+                <Button icon={<EllipsisOutlined />}>更多</Button>
+              </Dropdown>
+            </Space>
+          </div>
+        </div>
 
-        {activeTab === 'chapters' && <ChaptersTab />}
+        {/* 主体：activeTab 内容组件（零改动，原样保留） */}
+        <div className="pt-4 animate-fadeIn flex-1 min-h-0 overflow-y-auto px-6" style={{ animation: 'fadeIn 0.25s ease-out' }}>
+          {activeTab === 'dashboard' && <DashboardTab onSelectTab={setTabInUrl} />}
 
-        {activeTab === 'all_shots' && <AllShotsTab />}
-        {activeTab === 'actors' && <ActorsTab />}
-        {activeTab === 'roles' && <RolesTab />}
-        {activeTab === 'scenes' && <ScenesTab />}
-        {activeTab === 'props' && <PropsTab />}
-        {activeTab === 'costumes' && <CostumesTab />}
-        {activeTab === 'files' && <FilesTab />}
-        {activeTab === 'edit' && <EditTab />}
-        {activeTab === 'settings' && <SettingsTab />}
+          {activeTab === 'chapters' && <ChaptersTab />}
+
+          {activeTab === 'all_shots' && <AllShotsTab />}
+          {activeTab === 'actors' && <ActorsTab />}
+          {activeTab === 'roles' && <RolesTab />}
+          {activeTab === 'scenes' && <ScenesTab />}
+          {activeTab === 'props' && <PropsTab />}
+          {activeTab === 'costumes' && <CostumesTab />}
+          {activeTab === 'files' && <FilesTab />}
+          {activeTab === 'edit' && <EditTab />}
+          {activeTab === 'settings' && <SettingsTab />}
+        </div>
       </div>
     </div>
   )
