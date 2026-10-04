@@ -135,7 +135,7 @@ export function RolesTab() {
     if (!projectId) return
     setLoadingLinks(true)
     try {
-      const [actorRes, costumeRes] = await Promise.all([
+      const [actorRes, costumeEntitiesRes] = await Promise.all([
         StudioShotLinksService.listProjectEntityLinksApiV1StudioShotLinksEntityTypeGet({
           entityType: 'actor',
           projectId,
@@ -147,38 +147,23 @@ export function RolesTab() {
           page: 1,
           pageSize: 100,
         }),
-        StudioShotLinksService.listProjectEntityLinksApiV1StudioShotLinksEntityTypeGet({
-          entityType: 'costume',
-          projectId,
-          chapterId: null,
-          shotId: null,
-          assetId: null,
-          order: null,
-          isDesc: false,
-          page: 1,
-          pageSize: 100,
-        }),
+        // costume link 已废弃(改为直接写 Costume.project_id)，改用 entities 直接查项目服装
+        fetch('/api/v1/studio/entities/costume?project_id=' + projectId + '&page=1&page_size=100').then((r) => r.json()),
       ])
       const actorLinks = (actorRes.data?.items ?? []) as ProjectActorLinkRead[]
-      const costumeLinks = (costumeRes.data?.items ?? []) as ProjectCostumeLinkRead[]
+      const costumeItems = (costumeEntitiesRes?.data?.items ?? []) as CostumeLike[]
+      // costume link 废弃后，从 entities items 构造兼容 link 结构(costume_id)
+      const costumeLinks = costumeItems.map((c) => ({ costume_id: c.id }) as ProjectCostumeLinkRead)
       setProjectActorLinks(actorLinks)
       setProjectCostumeLinks(costumeLinks)
 
       const actorIds = Array.from(new Set(actorLinks.map((l) => l.actor_id)))
-      const costumeIds = Array.from(new Set(costumeLinks.map((l) => l.costume_id)))
 
-      const [actors, costumes] = await Promise.all([
+      const [actors] = await Promise.all([
         Promise.all(
           actorIds.map((id) =>
             StudioEntitiesApi.get('actor', id)
               .then((r) => (r.data ?? null) as ActorLike | null)
-              .catch(() => null),
-          ),
-        ),
-        Promise.all(
-          costumeIds.map((id) =>
-            StudioEntitiesApi.get('costume', id)
-              .then((r) => (r.data ?? null) as CostumeLike | null)
               .catch(() => null),
           ),
         ),
@@ -188,9 +173,10 @@ export function RolesTab() {
       actors.filter(Boolean).forEach((a) => {
         nextActors[(a as ActorLike).id] = a as ActorLike
       })
+      // costumes 直接用 entities 返回的完整对象，不再逐个 get 详情
       const nextCostumes: Record<string, CostumeLike> = {}
-      costumes.filter(Boolean).forEach((c) => {
-        nextCostumes[(c as CostumeLike).id] = c as CostumeLike
+      costumeItems.forEach((c) => {
+        nextCostumes[c.id] = c
       })
       setActorsById(nextActors)
       setCostumesById(nextCostumes)
