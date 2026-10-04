@@ -334,13 +334,16 @@ async function runAssetImages(ctx: PipelineCtx, opts?: RunOptions): Promise<Exec
       return (d?.data?.items || d?.items || []) as any[]
     },
     submit: async (char: any) => {
+      const imgId = char.character_images?.[0]?.id
+      const body: Record<string, unknown> = {
+        prompt: char.description || char.name || '',
+      }
+      // 只有角色有已绑定图片时才传 image_id，否则后端 400（image_id=1 不存在）
+      if (imgId) body.image_id = imgId
       const imgR = await fetch(`/api/v1/studio/image-tasks/characters/${char.id}/image-tasks`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          image_id: char.character_images?.[0]?.id || 1,
-          prompt: char.description || char.name,
-      }),
+        body: JSON.stringify(body),
       })
       const imgData = await imgR.json()
       return imgData?.data?.task_id ?? null
@@ -435,7 +438,9 @@ async function runVideos(ctx: PipelineCtx, opts?: RunOptions): Promise<ExecResul
       const vd = await FilmService.createVideoGenerationTaskApiV1FilmTasksVideoPost({
         requestBody: {
           shot_id: shot.id,
-          reference_mode: 'first_frame',
+          // 后端枚举值：first/last/key/first_last/first_last_key/text_only
+          // 原前端传 'first_frame' 会 422
+          reference_mode: 'first',
           ratio: '9:16',
           prompt: '',
         },
