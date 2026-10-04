@@ -3,7 +3,7 @@ import type { ReactNode } from 'react'
 import { Button, Card, Progress, Result, Space, Tag, Tooltip, message } from 'antd'
 import { ThunderboltOutlined, CloseCircleOutlined } from '@ant-design/icons'
 import { StudioChaptersService } from '../../../services/generated'
-import { useParams, Link } from 'react-router-dom'
+import { useParams, Link, useSearchParams } from 'react-router-dom'
 import { StageCard } from './ChapterPipeline/StageCard'
 import {
   usePipelineState,
@@ -296,6 +296,18 @@ export default function ChapterPipeline() {
   const chainPercent = Math.round((completedCount / totalCount) * 100)
   const chainRunning = chainRunningRef.current
 
+  const [searchParams, setSearchParams] = useSearchParams()
+  const stageFromUrl = searchParams.get('stage') as StageKey | null
+  const activeStage: StageKey =
+    stageFromUrl && STAGE_ORDER.includes(stageFromUrl)
+      ? stageFromUrl
+      : stages.find((s) => s.status !== 'done')?.key ?? STAGE_ORDER[0]
+  const setStageInUrl = (k: StageKey) =>
+    setSearchParams(
+      (prev) => { const n = new URLSearchParams(prev); n.set('stage', k); return n },
+      { replace: true },
+    )
+
   return (
     <div className="p-6 max-w-4xl mx-auto">
     <div className="mb-4 flex items-center justify-between">
@@ -339,7 +351,7 @@ export default function ChapterPipeline() {
             : 'bg-gray-50 text-gray-500 border-gray-200'
           const stText = s.status === 'done' ? '✓完成' : s.status === 'running' ? '进行中' : s.status === 'failed' ? '失败' : '待执行'
           return (
-            <div key={s.key} className={'flex-1 text-center px-2 py-1.5 rounded border text-xs ' + cls}>
+            <div key={s.key} onClick={() => setStageInUrl(s.key)} className={'flex-1 text-center px-2 py-1.5 rounded border text-xs cursor-pointer ' + cls + (s.key === activeStage ? ' ring-2 ring-blue-400' : '')}>
               <div className="text-[10px] opacity-70">步骤{i + 1}</div>
               <div className="font-medium">{STAGE_LABELS[s.key]}</div>
               <div className="text-[10px] opacity-80">{stText}</div>
@@ -391,6 +403,7 @@ export default function ChapterPipeline() {
       <Card>
         <div className="space-y-3">
           {stages.map((stage, i) => {
+            if (stage.key !== activeStage) return null
             // Special-case: asset_images stage keeps the original "去生成/审核"
             // external links to the roles page.
             let externalLink: ReactNode = null
