@@ -82,9 +82,9 @@ async def get_pipeline_status(chapter_id: str, db: AsyncSession = Depends(get_db
     return success_response({
         "stage_asset_extract": "done" if char_count > 0 else "not_started",
         "stage_divide": "done" if shots else "not_started",
-        "stage_asset_images": "done" if ci_count > 0 else "not_started",
-        "stage_keyframes": "done" if frame_count > 0 else ("not_started" if shots else "blocked"),
-        "stage_videos": "done" if video_count > 0 else ("not_started" if shots else "blocked"),
+        "stage_asset_images": "done" if ci_count >= char_count > 0 else ("partial" if ci_count > 0 else "not_started"),
+        "stage_keyframes": "done" if frame_count == len(shots) and shots else ("partial" if frame_count > 0 else ("not_started" if shots else "blocked")),
+        "stage_videos": "done" if video_count == len(shots) and shots else ("partial" if video_count > 0 else ("not_started" if shots else "blocked")),
         "stage_extract": "done" if cands else ("not_started" if shots else "blocked"),
         "stage_confirm": "done" if cands and not pending else ("partial" if linked else "not_started"),
         "pending_count": len(pending),
