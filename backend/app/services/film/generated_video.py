@@ -46,6 +46,13 @@ async def validate_shot_and_duration(db: AsyncSession, shot_id: str) -> ShotDeta
 
 
 async def file_id_to_data_url(db: AsyncSession, *, file_id: str) -> str:
+    """将 file_id 对应的图片转为 data URL。
+
+    视频生成端点（自建 Agnes API）接收 base64 图片作为 input_reference，
+    但 1MB 的 PNG base64 会让上游服务 503/429（上游负载饱和）。
+    因此对超过 200KB 的图片做 JPEG 压缩（quality=85），把 base64 从
+    ~1.4MB 降到 ~150-250KB，避免打饱和上游。
+    """
     file_obj = await db.get(FileItem, file_id)
     if file_obj is None or not file_obj.storage_key:
         raise HTTPException(status_code=400, detail=f"Invalid image file_id: {file_id}")
@@ -67,6 +74,34 @@ async def file_id_to_data_url(db: AsyncSession, *, file_id: str) -> str:
         content_type = (guessed_type or "").strip().lower() or None
     if not content_type or not content_type.startswith("image/"):
         raise HTTPException(status_code=400, detail=f"Invalid image file_id: {file_id}")
+
+    # 大图片（>200KB）压缩为 JPEG quality=85，避免 base64 body 打饱和上游
+    _COMPRESS_THRESHOLD = 200 * 1024  # 200KB
+    if len(content) > _COMPRESS_THRESHOLD:
+        try:
+            from PIL import Image
+            import io
+
+            img = Image.open(io.BytesIO(content))
+            # 转为 RGB（去掉 alpha 通道，JPEG 不支持透明）
+            if img.mode in ("RGBA", "LA", "P"):
+                img = img.convert("RGB")
+            # 限制最大边为 1280，保持比例
+            max_side = 1280
+            if max(img.size) > max_side:
+                ratio = max_side / max(img.size)
+                img = img.resize(
+                    (int(img.width * ratio), int(img.height * ratio)),
+                    Image.LANCZOS,
+                )
+            buf = io.BytesIO()
+            img.save(buf, format="JPEG", quality=85, optimize=True)
+            compressed = buf.getvalue()
+            encoded = base64.b64encode(compressed).decode("ascii")
+            return f"data:image/jpeg;base64,{encoded}"
+        except Exception:  # noqa: BLE001
+            # Pillow 不可用或解码失败时回退到原始 base64
+            pass
 
     image_format = content_type.split("/", 1)[1].split(";", 1)[0].strip().lower() or "png"
     encoded = base64.b64encode(content).decode("ascii")
