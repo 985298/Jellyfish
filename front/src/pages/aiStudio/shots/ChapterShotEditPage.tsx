@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Button, Card, Col, Divider, Empty, Layout, List, Modal, Popconfirm, Row, Segmented, Space, Spin, Tooltip, Typography, message } from 'antd'
-import { ArrowLeftOutlined, ClearOutlined, ReloadOutlined } from '@ant-design/icons'
+import { ArrowLeftOutlined, ClearOutlined, LeftOutlined, ReloadOutlined, RightOutlined } from '@ant-design/icons'
 import type {
   EntityNameExistenceItem,
   ShotAssetOverviewItem,
@@ -14,9 +14,7 @@ import type {
   ShotRead,
 } from '../../../services/generated'
 import {
-  StudioChaptersService,
   StudioEntitiesService,
-  StudioProjectsService,
   StudioShotDetailsService,
   StudioShotDialogLinesService,
   StudioShotsService,
@@ -30,6 +28,7 @@ import { ChapterShotDialogueConfirmation } from './components/ChapterShotDialogu
 import { ChapterShotPreparationGuide } from './components/ChapterShotPreparationGuide'
 import { StudioEntitiesApi } from '../../../services/studioEntities'
 import { resolveAssetUrl, buildFileDownloadUrl } from '../assets/utils'
+import { ChapterShotScopeProvider, useChapterShotScope } from './ChapterShotScope'
 
 const { Header, Content } = Layout
 
@@ -169,22 +168,35 @@ function overviewTypeToAssetKind(kind: ShotAssetOverviewItem['type']): AssetKind
 }
 
 export function ChapterShotEditPage() {
+  const { projectId, chapterId } = useParams<{ projectId: string; chapterId: string }>()
+  return (
+    <ChapterShotScopeProvider projectId={projectId} chapterId={chapterId}>
+      <ChapterShotEditInner />
+    </ChapterShotScopeProvider>
+  )
+}
+
+function ChapterShotEditInner() {
   const navigate = useNavigate()
   const { projectId, chapterId, shotId } = useParams<{
     projectId: string
     chapterId: string
     shotId: string
   }>()
+  const {
+    loading: chapterLoading,
+    shots,
+    patchShot,
+    chapterTitle,
+    chapterIndex,
+    projectStyle,
+  } = useChapterShotScope()
 
-  const [chapterTitle, setChapterTitle] = useState('')
-  const [chapterIndex, setChapterIndex] = useState<number | null>(null)
-  const [, setProjectVisualStyle] = useState<'现实' | '动漫'>('现实')
-  const [projectStyle, setProjectStyle] = useState<string>('真人都市')
-  const [shots, setShots] = useState<ShotRead[]>([])
   const [shot, setShot] = useState<ShotRead | null>(null)
   const [title, setTitle] = useState('')
   const [scriptExcerpt, setScriptExcerpt] = useState('')
-  const [loading, setLoading] = useState(true)
+  // 只代表「当前镜头」的数据加载态；章节级数据加载态由 ChapterShotScope 提供
+  const [shotLoading, setShotLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [semanticSaving, setSemanticSaving] = useState(false)
   const [preparationState, setPreparationState] = useState<ShotPreparationStateRead | null>(null)
@@ -314,38 +326,17 @@ export function ChapterShotEditPage() {
     setExpandedKinds((prev) => ({ ...prev, [kind]: !prev[kind] }))
   }
 
+  // 只加载「当前镜头」相关数据。project / chapter / shots 由 ChapterShotScope 在章节级缓存，
+  // 因此切换镜头时这里只会发出 2 个请求，且镜头列表不会被卸载。
   const loadPage = useCallback(async () => {
     if (!chapterId || !shotId || !projectId) return
-    setLoading(true)
+    setShotLoading(true)
     setDialogLoading(true)
     try {
-      const [projectRes, chRes, listRes, preparationRes, detailRes] = await Promise.all([
-        StudioProjectsService.getProjectApiV1StudioProjectsProjectIdGet({ projectId }),
-        StudioChaptersService.getChapterApiV1StudioChaptersChapterIdGet({ chapterId }),
-        StudioShotsService.listShotsApiV1StudioShotsGet({
-          chapterId,
-          page: 1,
-          pageSize: 100,
-          order: 'index',
-          isDesc: false,
-        }),
+      const [preparationRes, detailRes] = await Promise.all([
         StudioShotsService.getShotPreparationStateApiApiV1StudioShotsShotIdPreparationStateGet({ shotId }),
         StudioShotDetailsService.getShotDetailApiV1StudioShotDetailsShotIdGet({ shotId }),
       ])
-      const nextVisualStyle = projectRes.data?.visual_style
-      const nextStyle = projectRes.data?.style
-      if (nextVisualStyle === '现实' || nextVisualStyle === '动漫') {
-        setProjectVisualStyle(nextVisualStyle)
-      }
-      if (typeof nextStyle === 'string' && nextStyle.trim()) {
-        setProjectStyle(nextStyle)
-      }
-
-      const c = chRes.data
-      setChapterTitle(c?.title ?? '')
-      setChapterIndex(typeof c?.index === 'number' ? c.index : null)
-
-      const items = listRes.data?.items ?? []
       const preparationState = preparationRes.data ?? null
       const detail = detailRes.data ?? null
       const s = preparationState?.shot ?? null
@@ -366,7 +357,7 @@ export function ChapterShotEditPage() {
       setShot(s)
       setTitle(s.title ?? '')
       setScriptExcerpt(s.script_excerpt ?? '')
-      setShots(items.map((item) => (item.id === s.id ? s : item)))
+      patchShot(s)
       setShotAssetsOverview(preparationState?.assets_overview ?? null)
       setSavedDialogLines(preparationState?.saved_dialogue_lines ?? [])
       setExtractedDialogLines(
@@ -377,9 +368,9 @@ export function ChapterShotEditPage() {
       navigate(getChapterShotsPath(projectId, chapterId), { replace: true })
     } finally {
       setDialogLoading(false)
-      setLoading(false)
+      setShotLoading(false)
     }
-  }, [chapterId, navigate, projectId, shotId])
+  }, [chapterId, navigate, patchShot, projectId, shotId])
 
   const clearDialogDebounceTimers = useCallback(() => {
     for (const [, timer] of dialogDebounceTimersRef.current.entries()) {
@@ -393,7 +384,7 @@ export function ChapterShotEditPage() {
       setPreparationState(state)
       const nextShot = state.shot
       setShot(nextShot)
-      setShots((prev) => prev.map((item) => (item.id === nextShot.id ? nextShot : item)))
+      patchShot(nextShot)
       setShotAssetsOverview(state.assets_overview ?? null)
       setSavedDialogLines(state.saved_dialogue_lines ?? [])
       setExtractedDialogLines((state.dialogue_candidates ?? []).filter((item) => item.candidate_status === 'pending'))
@@ -402,7 +393,7 @@ export function ChapterShotEditPage() {
         setScriptExcerpt(nextShot.script_excerpt ?? '')
       }
     },
-    [],
+    [patchShot],
   )
 
   const loadPreparationState = useCallback(
@@ -768,7 +759,7 @@ export function ChapterShotEditPage() {
       }
       if (next) {
         setShot(next)
-        setShots((prev) => prev.map((x) => (x.id === next.id ? next : x)))
+        patchShot(next)
         message.success('已保存基础信息与镜头语言')
       }
     } catch {
@@ -842,6 +833,54 @@ export function ChapterShotEditPage() {
     if (!nextActionableShot) return
     goShot(nextActionableShot.id)
   }, [nextActionableShot])
+
+  // 在当前可见列表（受筛选影响）内的上一个/下一个镜头
+  const neighbouringShots = useMemo(() => {
+    const list = filteredShots.length ? filteredShots : shotsSorted
+    const total = list.length
+    if (!shotId) return { prev: null as ShotRead | null, next: null as ShotRead | null, position: 0, total }
+    const idx = list.findIndex((item) => item.id === shotId)
+    if (idx < 0) return { prev: null as ShotRead | null, next: null as ShotRead | null, position: 0, total }
+    return {
+      prev: idx > 0 ? list[idx - 1] : null,
+      next: idx < total - 1 ? list[idx + 1] : null,
+      position: idx + 1,
+      total,
+    }
+  }, [filteredShots, shotId, shotsSorted])
+
+  const goPrevShot = useCallback(() => {
+    if (neighbouringShots.prev) goShot(neighbouringShots.prev.id)
+  }, [goShot, neighbouringShots.prev])
+
+  const goNextShot = useCallback(() => {
+    if (neighbouringShots.next) goShot(neighbouringShots.next.id)
+  }, [goShot, neighbouringShots.next])
+
+  // ←/→ 键盘切换镜头；输入框内与弹窗打开时不拦截
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return
+      if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return
+      if (linkingOpen) return
+      const target = e.target as HTMLElement | null
+      if (target) {
+        const tag = target.tagName
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target.isContentEditable) return
+      }
+      e.preventDefault()
+      if (e.key === 'ArrowLeft') goPrevShot()
+      else goNextShot()
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [goPrevShot, goNextShot, linkingOpen])
+
+  // 切换镜头后把列表滚到当前项
+  const activeShotItemRef = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    activeShotItemRef.current?.scrollIntoView({ block: 'nearest' })
+  }, [shotId])
 
   const openLinkingModal = useCallback(
     async (kind: AssetKind, name: string, item: EntityNameExistenceItem, hint: string) => {
@@ -1225,14 +1264,13 @@ export function ChapterShotEditPage() {
             flexDirection: 'column',
           }}
         >
-          {loading ? (
+          {chapterLoading ? (
             <div className="flex-1 flex items-center justify-center min-h-[200px]">
               <Spin size="large" />
             </div>
-          ) : !shot ? (
-            <Empty description="无法加载分镜" />
           ) : (
             <div className="flex flex-col gap-3" style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
+              {/* 镜头列表常驻：切换镜头时不再随 loading 一起卸载，筛选态与滚动位置得以保留 */}
               <Card
                 size="small"
                 title={
@@ -1296,6 +1334,17 @@ export function ChapterShotEditPage() {
                         : '当前没有待处理镜头'}
                     </Button>
                   </div>
+                  <div className="mt-2 flex items-center gap-2">
+                    <Tooltip title="上一个镜头（←）">
+                      <Button size="small" icon={<LeftOutlined />} disabled={!neighbouringShots.prev} onClick={goPrevShot} />
+                    </Tooltip>
+                    <span className="flex-1 text-center text-xs text-slate-500">
+                      {neighbouringShots.position}/{neighbouringShots.total}
+                    </span>
+                    <Tooltip title="下一个镜头（→）">
+                      <Button size="small" icon={<RightOutlined />} disabled={!neighbouringShots.next} onClick={goNextShot} />
+                    </Tooltip>
+                  </div>
                 </div>
                 <List
                   size="small"
@@ -1341,7 +1390,7 @@ export function ChapterShotEditPage() {
                           boxShadow: active && itemCompleted ? '0 0 0 1px rgba(34,197,94,0.08) inset' : undefined,
                         }}
                       >
-                        <div className="min-w-0">
+                        <div className="min-w-0" ref={active ? activeShotItemRef : null}>
                           <div className="flex items-center justify-between gap-2">
                             <div className="font-medium truncate">
                               #{item.index} · {item.title?.trim() ? item.title : '未命名镜头'}
@@ -1407,15 +1456,23 @@ export function ChapterShotEditPage() {
                 />
               </Card>
 
-              <ChapterShotPreparationGuide
-                statusReady={statusReady}
-                checklistItems={checklistItems}
-                nextStepTitle={nextStepTitle}
-                nextStepDescription={nextStepDescription}
-                onGoToStudio={goToStudio}
-              />
+              {shotLoading ? (
+                <div className="flex-1 flex items-center justify-center min-h-[200px]">
+                  <Spin />
+                </div>
+              ) : !shot ? (
+                <Empty description="无法加载分镜" />
+              ) : (
+                <>
+                  <ChapterShotPreparationGuide
+                    statusReady={statusReady}
+                    checklistItems={checklistItems}
+                    nextStepTitle={nextStepTitle}
+                    nextStepDescription={nextStepDescription}
+                    onGoToStudio={goToStudio}
+                  />
 
-              <Row gutter={[12, 12]} style={{ flex: 1, minHeight: 0, overflow: 'hidden' }} align="stretch" wrap={false}>
+                  <Row gutter={[12, 12]} style={{ flex: 1, minHeight: 0, overflow: 'hidden' }} align="stretch" wrap={false}>
                 <Col xs={24} lg={8} style={{ minWidth: 0, height: '100%', display: 'flex' }}>
                   <Card
                     size="small"
@@ -1610,6 +1667,8 @@ export function ChapterShotEditPage() {
                   </Card>
                 </Col>
               </Row>
+                </>
+              )}
             </div>
           )}
         </Card>
