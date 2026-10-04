@@ -10,7 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.utils import apply_keyword_filter, apply_order, paginate
-from app.models.studio import Actor, Chapter, Costume, Project, ProjectActorLink, Prop, Scene, Shot, ShotCharacterLink
+from app.models.studio import Actor, Chapter, CharacterImage, Costume, Project, ProjectActorLink, Prop, Scene, Shot, ShotCharacterLink
 from app.schemas.studio.cast import ShotCharacterLinkCreate
 from app.services.common import entity_already_exists, entity_not_found
 from app.services.studio.entity_specs import DEFAULT_VIEW_ANGLES, LINK_MODEL_BY_ENTITY, entity_spec, normalize_entity_type
@@ -96,7 +96,19 @@ async def list_entities_paginated(
         thumbnail = thumbnails.get(item.id, "")
         if entity_type_norm in {"actor", "character"}:
             read_model = spec.read_model
-            payload.append(read_model.model_validate(item).model_copy(update={"thumbnail": thumbnail}).model_dump())
+            d = read_model.model_validate(item).model_copy(update={"thumbnail": thumbnail}).model_dump()
+            if entity_type_norm == "character":
+                # 补 character_images 字段，供前端 image-tasks 拿 image_id（修复 400 image_id is required）
+                ci_rows = (await db.execute(
+                    select(CharacterImage)
+                    .where(CharacterImage.character_id == item.id)
+                    .order_by(CharacterImage.is_primary.desc(), CharacterImage.id)
+                )).scalars().all()
+                d["character_images"] = [
+                    {"id": r.id, "is_primary": r.is_primary, "view_angle": r.view_angle, "file_id": r.file_id}
+                    for r in ci_rows
+                ]
+            payload.append(d)
         else:
             payload.append(_asset_read_payload(item, thumbnail))
     return payload, total
