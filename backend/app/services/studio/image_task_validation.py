@@ -15,6 +15,7 @@ from app.models.studio import (
     Scene,
     SceneImage,
 )
+from app.models.types import AssetQualityLevel, AssetViewAngle
 from app.services.common import entity_not_found, invalid_choice, not_belong_to, required_field
 
 
@@ -103,10 +104,18 @@ async def validate_character_image(
     if character is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=entity_not_found("Character"))
     if image_id is None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=required_field("image_id", when="character image generation"),
+        # 第一次生成：无 image_id，自动创建 CharacterImage 占位行（鸡生蛋修复）
+        image_row = CharacterImage(
+            character_id=character_id,
+            file_id=None,
+            quality_level=AssetQualityLevel.low,
+            view_angle=AssetViewAngle.front,
+            format="png",
+            is_primary=True,
         )
+        db.add(image_row)
+        await db.flush()
+        return image_row
     image_row = await db.get(CharacterImage, image_id)
     if image_row is None or image_row.character_id != character_id:
         raise HTTPException(
