@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
-import { Button, Card, Progress, Result, Space, Tag, Tooltip, message } from 'antd'
+import { Button, Card, Progress, Result, Segmented, Space, Tag, Tooltip, message } from 'antd'
 import { ThunderboltOutlined, CloseCircleOutlined } from '@ant-design/icons'
 import { StudioChaptersService } from '../../../services/generated'
 import { useParams, Link } from 'react-router-dom'
@@ -73,13 +73,19 @@ const INITIAL_STAGES: Stage[] = [
   },
 ]
 
+// 顶部执行策略：链式 = 成功后自动往下跑；单步 = 只跑当前阶段
+type RunPolicy = 'chain' | 'step'
+
 export default function ChapterPipeline() {
   const { projectId, chapterId } = useParams<{ projectId?: string; chapterId?: string }>()
+  const [runPolicy, setRunPolicy] = useState<RunPolicy>('step')
   const [loading, setLoading] = useState(false)
   const [chapterTitle, setChapterTitle] = useState('')
   const [scriptText, setScriptText] = useState('')
   const [runningStage, setRunningStage] = useState<StageKey | null>(null)
   const taskIdRef = useRef<Partial<Record<StageKey, string | null>>>({})
+  const stageTaskIdsRef = useRef<Partial<Record<StageKey, string[]>>>({})
+  const abortRef = useRef<Set<StageKey>>(new Set())
   const chainAbortRef = useRef(false)
 
   const { stages, updateStage, resetStageForRun, resetAllStages, hydrateFromPipelineStatus } = usePipelineState(INITIAL_STAGES)
@@ -127,25 +133,27 @@ export default function ChapterPipeline() {
     rememberTaskId: (key: StageKey, taskId: string | null) => {
       taskIdRef.current[key] = taskId
     },
+    shouldAbort: (key: StageKey) => abortRef.current.has(key),
+    rememberTaskIds: (key: StageKey, taskIds: string[]) => {
+      stageTaskIdsRef.current[key] = taskIds
+    },
   }), [projectId, chapterId, scriptText, updateStage, resetStageForRun, poll])
 
-  const runners = useMemo(() => buildStageRunners(ctx, {
-    chainNext: async (key: StageKey) => {
-      if (chainAbortRef.current) return
-      await runnersRef.current[key]?.()
-    },
-  }), [ctx])
+  const runners = useMemo(() => buildStageRunners(ctx), [ctx])
 
-  // Keep a ref so chained next-stage calls see the latest runners without
-  // rebuilding them on every render (which would reset closures mid-chain).
+  // Keep a ref so the chain loop always calls the latest runners.
   const runnersRef = useRef(runners)
   runnersRef.current = runners
 
-  const runStage = useCallback((key: StageKey) => {
+  // 单个阶段的最小执行单元：只跑自己，不牵扯后继阶段
+  const runStage = useCallback((key: StageKey, runOpts?: { onlyIds?: string[] }) => {
+    abortRef.current.delete(key)
     setRunningStage(key)
-    chainAbortRef.current = false
-    return runnersRef.current[key]()
-      .finally(() => setRunningStage((cur) => (cur === key ? null : cur)))
+    return runnersRef.current[key](runOpts)
+      .finally(() => {
+        abortRef.current.delete(key)
+        setRunningStage((cur) => (cur === key ? null : cur))
+      })
   }, [])
 
   // C2：Agent SSE 编排（简单章节快速跑，失败控制不精细）
@@ -162,7 +170,8 @@ export default function ChapterPipeline() {
   const [chainPausedAt, setChainPausedAt] = useState<StageKey | null>(null)
   const [chainLog, setChainLog] = useState<{ key: StageKey; ok: boolean; error?: string }[]>([])
 
-  const runChain = useCallback(async () => {
+  // 从指定阶段开始一路往后跑；链式推进只在这里发生
+  const runChainFrom = useCallback(async (startKey: StageKey) => {
     if (!projectId || !chapterId || !scriptText) {
       message.error('缺少项目/章节/剧本')
       return
@@ -173,7 +182,8 @@ export default function ChapterPipeline() {
     setChainPausedAt(null)
     setChainLog([])
     let lastError: string | null = null
-    for (const key of STAGE_ORDER) {
+    const startIdx = STAGE_ORDER.indexOf(startKey)
+    for (const key of STAGE_ORDER.slice(startIdx)) {
       if (chainAbortRef.current) break
       setRunningStage(key)
       const res: ExecResult = await runnersRef.current[key]()
@@ -183,26 +193,72 @@ export default function ChapterPipeline() {
           // 必须暂停：后续阶段无法跑
           setChainPausedAt(key)
           lastError = res.error || `${key} 失败`
-          message.error(`「${STAGE_LABELS[key]}」失败，已暂停：${lastError}。请处理后重新点"一键跑通"继续。`)
+          message.error(`「${STAGE_LABELS[key]}」失败，已暂停：${lastError}。请处理后重新点"继续跑通"继续。`)
           break
         }
-        // 可跳过失败：标 partial，继续推进
+        // 可跳过失败：继续推进（失败项留在 output.failedItems 里供单独重试）
         message.warning(`「${STAGE_LABELS[key]}」部分失败（${res.error}），已跳过失败项继续推进`)
       }
     }
     setRunningStage(null)
     chainRunningRef.current = false
     if (!chainAbortRef.current && !lastError) {
-      message.success('一键跑通完成')
+      message.success('链式跑通完成')
     }
   }, [projectId, chapterId, scriptText])
+
+  const runChain = useCallback(() => runChainFrom(STAGE_ORDER[0]), [runChainFrom])
+
+  // 阶段级中止：置中止标志让 runner 尽快跳出，并对已提交任务逐个 cancel
+  const stopStage = useCallback(async (key: StageKey) => {
+    abortRef.current.add(key)
+    chainAbortRef.current = true
+    const ids = [
+      ...(stageTaskIdsRef.current[key] ?? []),
+      ...(taskIdRef.current[key] ? [taskIdRef.current[key] as string] : []),
+    ]
+    let cancelled = 0
+    for (const id of new Set(ids)) {
+      try {
+        const res = await fetch(`/api/v1/film/tasks/${id}/cancel`, { method: 'POST' })
+        if (res.ok) cancelled += 1
+      } catch {
+        // 单个取消失败不阻塞其余任务
+      }
+    }
+    updateStage(key, {
+      status: 'partial',
+      error: `已中止${cancelled ? `，取消 ${cancelled} 个任务` : ''}`,
+    })
+    setRunningStage((cur) => (cur === key ? null : cur))
+    chainRunningRef.current = false
+    message.info(`「${STAGE_LABELS[key]}」已请求中止${cancelled ? `，已取消 ${cancelled} 个任务` : ''}`)
+  }, [updateStage])
 
   const stopChain = useCallback(() => {
     chainAbortRef.current = true
     chainRunningRef.current = false
+    const key = runningStage
+    if (key) void stopStage(key)
     setRunningStage(null)
-    message.info('已请求停止链式跑通')
-  }, [])
+    if (!key) message.info('已请求停止链式跑通')
+  }, [runningStage, stopStage])
+
+  // 阶段卡片上的「执行」：链式策略下从该阶段往后跑，单步策略下只跑自己
+  const handleStageRun = useCallback((key: StageKey) => {
+    if (runPolicy === 'chain') void runChainFrom(key)
+    else void runStage(key)
+  }, [runPolicy, runChainFrom, runStage])
+
+  // 仅重试失败项
+  const handleRetryFailed = useCallback((key: StageKey) => {
+    const failed = stages.find((s) => s.key === key)?.output?.failedItems ?? []
+    if (!failed.length) {
+      message.info('没有失败项可重试')
+      return
+    }
+    void runStage(key, { onlyIds: failed.map((item) => item.id) })
+  }, [stages, runStage])
 
   // canRun: a stage is runnable if its predecessor is done (or it's the first).
   const canRun = useCallback((key: StageKey) => {
@@ -230,6 +286,16 @@ export default function ChapterPipeline() {
           <p className="text-sm text-gray-500">{chapterTitle ? `章节: ${chapterTitle}` : ''}</p>
         </div>
         <Space>
+          <Tooltip title="链式跑通：执行某阶段成功后自动往下跑；单步执行：只跑你点的那一个阶段">
+            <Segmented
+              value={runPolicy}
+              onChange={(v) => setRunPolicy(v as RunPolicy)}
+              options={[
+                { label: '链式跑通', value: 'chain' },
+                { label: '单步执行', value: 'step' },
+              ]}
+            />
+          </Tooltip>
           {chainRunning ? (
             <Button danger icon={<CloseCircleOutlined />} onClick={stopChain}>
               停止跑通
@@ -328,7 +394,9 @@ export default function ChapterPipeline() {
                 canRun={canRun(stage.key)}
                 busy={busy}
                 externalLink={externalLink}
-                onRun={(k) => void runStage(k)}
+                onRun={handleStageRun}
+                onStop={(k) => void stopStage(k)}
+                onRetryFailed={handleRetryFailed}
                 projectId={projectId}
                 chapterId={chapterId}
               />

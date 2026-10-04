@@ -10,7 +10,13 @@
 
 import { message } from 'antd'
 import { FilmService } from '../../../../services/generated'
-import type { StageKey, StageOutput, StagePatch } from './types'
+import type { StageKey, StageOutput, StageOutputFailedItem, StagePatch } from './types'
+
+/** 单个展开任务：记下它属于哪个实体，才能在轮询后知道具体哪一项失败 */
+type Submission = { id: string; label: string; taskId: string }
+
+/** Runner 可选的入参：onlyIds 用于「仅重试失败项」 */
+export type RunOptions = { onlyIds?: string[] }
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 // Task result payloads are intentionally typed as `any` because the backend
@@ -27,6 +33,10 @@ export type PipelineCtx = {
   resetStageForRun: (key: StageKey) => void
   poll: (taskId: string, onTick: (progress: number, status: string) => void) => Promise<{ status: string; progress: number }>
   rememberTaskId?: (key: StageKey, taskId: string | null) => void
+  /** 当前阶段是否已被请求中止（中止中段 for-loop 使用） */
+  shouldAbort?: (key: StageKey) => boolean
+  /** 记录本阶段已提交的任务 id 列表，供批量 cancel */
+  rememberTaskIds?: (key: StageKey, taskIds: string[]) => void
 }
 
 export type ExecResult = { ok: boolean; output?: StageOutput; error?: string; taskId?: string | null }
@@ -61,6 +71,48 @@ async function pollOne(
   if (result.status === 'timeout') return 'timeout'
   if (result.status === 'cancelled') return 'cancelled'
   return 'failed'
+}
+
+/**
+ * 串行轮询一批已提交的任务。相比逐内联轮询，这里统一处理：
+ * - 中止：每轮开始检查 shouldAbort，命中即跳出且不统计后续为失败
+ * - 失败明细：记录具体失败的实体，供「仅重试失败项」使用
+ */
+async function pollBatch(
+  ctx: PipelineCtx,
+  key: StageKey,
+  submissions: Submission[],
+  label: string,
+): Promise<{ completed: number; failed: StageOutputFailedItem[]; aborted: boolean }> {
+  const failed: StageOutputFailedItem[] = []
+  let completed = 0
+  let aborted = false
+  const total = submissions.length
+  const subProgress = (i: number) => Math.round(((i + 1) / Math.max(total, 1)) * 100)
+  for (let i = 0; i < total; i += 1) {
+    if (ctx.shouldAbort?.(key)) {
+      aborted = true
+      break
+    }
+    ctx.updateStage(key, {
+      progress: Math.max(2, subProgress(i) - 5),
+      status: 'running',
+    })
+    const outcome = await pollOne(ctx, submissions[i].taskId, () => {})
+    if (outcome === 'succeeded') completed += 1
+    else failed.push({ id: submissions[i].id, label: submissions[i].label })
+    ctx.updateStage(key, {
+      progress: subProgress(i),
+      status: 'running',
+      output: {
+        count: completed,
+        total,
+        label,
+        extra: failed.length ? `失败 ${failed.length}` : undefined,
+      },
+    })
+  }
+  return { completed, failed, aborted }
 }
 
 async function runAssetExtract(ctx: PipelineCtx): Promise<ExecResult> {
@@ -103,7 +155,7 @@ async function runAssetExtract(ctx: PipelineCtx): Promise<ExecResult> {
   }
 }
 
-async function runAssetImages(ctx: PipelineCtx): Promise<ExecResult> {
+async function runAssetImages(ctx: PipelineCtx, opts?: RunOptions): Promise<ExecResult> {
   const { projectId } = ctx
   if (!projectId) return { ok: false, error: '缺少项目' }
   ctx.setLoading(true)
@@ -111,15 +163,18 @@ async function runAssetImages(ctx: PipelineCtx): Promise<ExecResult> {
   try {
     const r = await fetch(`/api/v1/studio/entities/character?project_id=${projectId}`)
     const charsData = await r.json()
-    const chars = charsData?.data?.items || charsData?.items || []
-    if (!chars.length) {
+    const allChars = charsData?.data?.items || charsData?.items || []
+    const targets = opts?.onlyIds?.length
+      ? allChars.filter((c: any) => opts.onlyIds?.includes(c.id))
+      : allChars
+    if (!targets.length) {
       const output: StageOutput = { count: 0, total: 0, label: '张图片', extra: '无角色资产' }
       ctx.updateStage('asset_images', { status: 'done', progress: 100, output })
       return { ok: true, output }
     }
-    const total = chars.length
-    const taskIds: string[] = []
-    for (const char of chars) {
+    const total = targets.length
+    const submissions: Submission[] = []
+    for (const char of targets) {
       try {
         const imgR = await fetch(`/api/v1/studio/image-tasks/characters/${char.id}/image-tasks`, {
           method: 'POST',
@@ -130,36 +185,38 @@ async function runAssetImages(ctx: PipelineCtx): Promise<ExecResult> {
           }),
         })
         const imgData = await imgR.json()
-        if (imgData?.data?.task_id) taskIds.push(imgData.data.task_id)
+        if (imgData?.data?.task_id) {
+          submissions.push({ id: char.id, label: char.name || char.id, taskId: imgData.data.task_id })
+        }
       } catch {
         // skip failed submission
       }
     }
-    let completed = 0
-    let failed = 0
-    const subProgress = (i: number) => Math.round(((i + 1) / total) * 100)
-    for (let i = 0; i < taskIds.length; i++) {
-      ctx.updateStage('asset_images', {
-        progress: Math.max(2, subProgress(i) - 5),
-        status: 'running',
-      })
-      const outcome = await pollOne(ctx, taskIds[i], () => {})
-      if (outcome === 'succeeded') completed++
-      else failed++
-      ctx.updateStage('asset_images', {
-        progress: subProgress(i),
-        status: 'running',
-        output: { count: completed, total, label: '张图片', extra: failed ? `失败 ${failed}` : undefined },
-      })
+    ctx.rememberTaskIds?.('asset_images', submissions.map((s) => s.taskId))
+
+    const { completed, failed, aborted } = await pollBatch(ctx, 'asset_images', submissions, '张图片')
+    if (aborted) {
+      const output: StageOutput = {
+        count: completed,
+        total,
+        label: '张图片',
+        extra: '已中止',
+        failedItems: failed,
+      }
+      ctx.updateStage('asset_images', { status: 'partial', progress: Math.min(99, total ? Math.round((completed / total) * 100) : 0), output })
+      return { ok: false, error: '已中止该阶段', output }
     }
     const output: StageOutput = {
       count: completed,
       total,
       label: '张图片',
-      extra: failed ? `失败 ${failed}` : undefined,
+      extra: failed.length ? `失败 ${failed.length}` : undefined,
+      failedItems: failed,
     }
-    ctx.updateStage('asset_images', { status: 'done', progress: 100, output })
-    return { ok: true, output }
+    // 一个都没成功才算阶段失败；部分失败标 partial 让后续阶段仍可推进
+    const allFailed = completed === 0 && failed.length > 0
+    ctx.updateStage('asset_images', { status: allFailed ? 'failed' : 'done', progress: 100, output })
+    return { ok: !allFailed, output, error: allFailed ? `全部 ${failed.length} 项失败` : undefined }
   } catch (e: any) {
     const error = e?.message || '生成失败'
     ctx.updateStage('asset_images', { status: 'failed', error })
@@ -210,7 +267,7 @@ async function runDivide(ctx: PipelineCtx): Promise<ExecResult> {
   }
 }
 
-async function runKeyframes(ctx: PipelineCtx): Promise<ExecResult> {
+async function runKeyframes(ctx: PipelineCtx, opts?: RunOptions): Promise<ExecResult> {
   const { chapterId } = ctx
   if (!chapterId) return { ok: false, error: '缺少章节' }
   ctx.setLoading(true)
@@ -218,15 +275,18 @@ async function runKeyframes(ctx: PipelineCtx): Promise<ExecResult> {
   try {
     const r = await fetch(`/api/v1/studio/shots?chapter_id=${chapterId}`)
     const shotsData = await r.json()
-    const shots = shotsData?.data?.items || shotsData?.items || []
-    if (!shots.length) {
+    const allShots = shotsData?.data?.items || shotsData?.items || []
+    const targets = opts?.onlyIds?.length
+      ? allShots.filter((s: any) => opts.onlyIds?.includes(s.id))
+      : allShots
+    if (!targets.length) {
       const output: StageOutput = { count: 0, total: 0, label: '张帧图', extra: '无镜头' }
       ctx.updateStage('keyframes', { status: 'done', progress: 100, output })
       return { ok: true, output }
     }
-    const total = shots.length
-    const taskIds: string[] = []
-    for (const shot of shots) {
+    const total = targets.length
+    const submissions: Submission[] = []
+    for (const shot of targets) {
       try {
         const fr = await fetch(`/api/v1/studio/image-tasks/shot/${shot.id}/frame-image-tasks`, {
           method: 'POST',
@@ -234,36 +294,33 @@ async function runKeyframes(ctx: PipelineCtx): Promise<ExecResult> {
           body: JSON.stringify({ frame_type: 'first', model_id: null }),
         })
         const fd = await fr.json()
-        if (fd?.data?.task_id) taskIds.push(fd.data.task_id)
+        if (fd?.data?.task_id) {
+          submissions.push({ id: shot.id, label: `#${shot.index ?? '镜头'} ${shot.title ?? ''}`.trim(), taskId: fd.data.task_id })
+        }
       } catch {
         // skip
       }
     }
-    let completed = 0
-    let failed = 0
-    const subProgress = (i: number) => Math.round(((i + 1) / total) * 100)
-    for (let i = 0; i < taskIds.length; i++) {
-      ctx.updateStage('keyframes', {
-        progress: Math.max(2, subProgress(i) - 5),
-        status: 'running',
-      })
-      const outcome = await pollOne(ctx, taskIds[i], () => {})
-      if (outcome === 'succeeded') completed++
-      else failed++
-      ctx.updateStage('keyframes', {
-        progress: subProgress(i),
-        status: 'running',
-        output: { count: completed, total, label: '张帧图', extra: failed ? `失败 ${failed}` : undefined },
-      })
-    }
-    const output: StageOutput = {
+    ctx.rememberTaskIds?.('keyframes', submissions.map((s) => s.taskId))
+
+    const { completed, failed, aborted } = await pollBatch(ctx, 'keyframes', submissions, '张帧图')
+    const buildOutput = (extra?: string): StageOutput => ({
       count: completed,
       total,
       label: '张帧图',
-      extra: failed ? `失败 ${failed}` : undefined,
+      extra,
+      failedItems: failed,
+    })
+    if (aborted) {
+      const output = buildOutput('已中止')
+      ctx.updateStage('keyframes', { status: 'partial', progress: Math.min(99, Math.round((completed / total) * 100)), output })
+      return { ok: false, error: '已中止该阶段', output }
     }
-    ctx.updateStage('keyframes', { status: 'done', progress: 100, output })
-    return { ok: true, output }
+    const output = buildOutput(failed.length ? `失败 ${failed.length}` : undefined)
+    // 帧图属于可部分失败阶段：只要有成功就让链路继续，失败项留给「仅重试失败项」
+    const allFailed = completed === 0 && failed.length > 0
+    ctx.updateStage('keyframes', { status: allFailed ? 'failed' : 'done', progress: 100, output })
+    return { ok: !allFailed, output, error: allFailed ? `全部 ${failed.length} 项失败` : undefined }
   } catch (e: any) {
     const error = e?.message || '生成失败'
     ctx.updateStage('keyframes', { status: 'failed', error })
@@ -273,7 +330,7 @@ async function runKeyframes(ctx: PipelineCtx): Promise<ExecResult> {
   }
 }
 
-async function runVideos(ctx: PipelineCtx): Promise<ExecResult> {
+async function runVideos(ctx: PipelineCtx, opts?: RunOptions): Promise<ExecResult> {
   const { chapterId } = ctx
   if (!chapterId) return { ok: false, error: '缺少章节' }
   ctx.setLoading(true)
@@ -281,15 +338,18 @@ async function runVideos(ctx: PipelineCtx): Promise<ExecResult> {
   try {
     const r = await fetch(`/api/v1/studio/shots?chapter_id=${chapterId}`)
     const shotsData = await r.json()
-    const shots = shotsData?.data?.items || shotsData?.items || []
-    if (!shots.length) {
+    const allShots = shotsData?.data?.items || shotsData?.items || []
+    const targets = opts?.onlyIds?.length
+      ? allShots.filter((s: any) => opts.onlyIds?.includes(s.id))
+      : allShots
+    if (!targets.length) {
       const output: StageOutput = { count: 0, total: 0, label: '个视频', extra: '无镜头' }
       ctx.updateStage('videos', { status: 'done', progress: 100, output })
       return { ok: true, output }
     }
-    const total = shots.length
-    const taskIds: string[] = []
-    for (const shot of shots) {
+    const total = targets.length
+    const submissions: Submission[] = []
+    for (const shot of targets) {
       try {
         const vd = await FilmService.createVideoGenerationTaskApiV1FilmTasksVideoPost({
           requestBody: {
@@ -299,36 +359,32 @@ async function runVideos(ctx: PipelineCtx): Promise<ExecResult> {
             prompt: '',
           },
         })
-        if (vd?.data?.task_id) taskIds.push(vd.data.task_id)
+        if (vd?.data?.task_id) {
+          submissions.push({ id: shot.id, label: `#${shot.index ?? '镜头'} ${shot.title ?? ''}`.trim(), taskId: vd.data.task_id })
+        }
       } catch {
         // skip
       }
     }
-    let completed = 0
-    let failed = 0
-    const subProgress = (i: number) => Math.round(((i + 1) / total) * 100)
-    for (let i = 0; i < taskIds.length; i++) {
-      ctx.updateStage('videos', {
-        progress: Math.max(2, subProgress(i) - 5),
-        status: 'running',
-      })
-      const outcome = await pollOne(ctx, taskIds[i], () => {})
-      if (outcome === 'succeeded') completed++
-      else failed++
-      ctx.updateStage('videos', {
-        progress: subProgress(i),
-        status: 'running',
-        output: { count: completed, total, label: '个视频', extra: failed ? `失败 ${failed}` : undefined },
-      })
-    }
-    const output: StageOutput = {
+    ctx.rememberTaskIds?.('videos', submissions.map((s) => s.taskId))
+
+    const { completed, failed, aborted } = await pollBatch(ctx, 'videos', submissions, '个视频')
+    const buildOutput = (extra?: string): StageOutput => ({
       count: completed,
       total,
       label: '个视频',
-      extra: failed ? `失败 ${failed}` : undefined,
+      extra,
+      failedItems: failed,
+    })
+    if (aborted) {
+      const output = buildOutput('已中止')
+      ctx.updateStage('videos', { status: 'partial', progress: Math.min(99, Math.round((completed / total) * 100)), output })
+      return { ok: false, error: '已中止该阶段', output }
     }
-    ctx.updateStage('videos', { status: 'done', progress: 100, output })
-    return { ok: true, output }
+    const output = buildOutput(failed.length ? `失败 ${failed.length}` : undefined)
+    const allFailed = completed === 0 && failed.length > 0
+    ctx.updateStage('videos', { status: allFailed ? 'failed' : 'done', progress: 100, output })
+    return { ok: !allFailed, output, error: allFailed ? `全部 ${failed.length} 项失败` : undefined }
   } catch (e: any) {
     const error = e?.message || '生成失败'
     ctx.updateStage('videos', { status: 'failed', error })
@@ -369,16 +425,15 @@ async function runRender(ctx: PipelineCtx): Promise<ExecResult> {
   }
 }
 
-export type StageRunner = () => Promise<ExecResult>
+export type StageRunner = (opts?: RunOptions) => Promise<ExecResult>
 
-/** Build a map of stage-key -> runner. Each runner handles its own message toast + chaining. */
+/** Build a map of stage-key -> runner. Each runner handles its own message toast. */
 export function buildStageRunners(
   ctx: PipelineCtx,
   opts: {
     onLoading?: (content: string) => void
     onSuccess?: (content: string) => void
     onError?: (content: string) => void
-    chainNext?: (key: StageKey) => Promise<void>
   } = {},
 ): Record<StageKey, StageRunner> {
   const onLoading = (content: string) =>
@@ -390,11 +445,10 @@ export function buildStageRunners(
 
   const wrap = (
     label: string,
-    fn: (ctx: PipelineCtx) => Promise<ExecResult>,
-    next?: StageKey,
-  ): StageRunner => async () => {
+    fn: (ctx: PipelineCtx, opts?: RunOptions) => Promise<ExecResult>,
+  ): StageRunner => async (runOpts?: RunOptions) => {
     onLoading(`${label}中...`)
-    const res = await fn(ctx)
+    const res = await fn(ctx, runOpts)
     if (res.ok) {
       const o = res.output
       const countText = o
@@ -403,19 +457,20 @@ export function buildStageRunners(
           : `${label}完成 ${o.count ?? 0} ${o.label || ''}`.trim()
         : `${label}完成`
       onSuccess(countText)
-      if (next && opts.chainNext) await opts.chainNext(next)
     } else {
       onError(res.error || `${label}失败`)
     }
     return res
   }
 
+  // 注意：这里不再自带后继阶段。链式推进由调用方按 STAGE_ORDER 循环驱动，
+  // 否则「继续执行」与 runner 内部递归会互相叠加导致同一阶段跑两遍。
   return {
-    asset_extract: wrap('资产提取', runAssetExtract, 'asset_images'),
-    asset_images: wrap('资产图片', runAssetImages, 'divide'),
-    divide: wrap('分镜提取', runDivide, 'keyframes'),
-    keyframes: wrap('帧图生成', runKeyframes, 'videos'),
-    videos: wrap('视频生成', runVideos, 'render'),
+    asset_extract: wrap('资产提取', runAssetExtract),
+    asset_images: wrap('资产图片', runAssetImages),
+    divide: wrap('分镜提取', runDivide),
+    keyframes: wrap('帧图生成', runKeyframes),
+    videos: wrap('视频生成', runVideos),
     render: wrap('章节渲染', runRender),
   }
 }

@@ -25,8 +25,16 @@ export type StageOutput = {
   label?: string
   /** 附加说明，如 "失败 2" */
   extra?: string
+  /** 失败明细，用于「仅重试失败项」 */
+  failedItems?: StageOutputFailedItem[]
   /** 成片访问地址（render 阶段） */
   url?: string
+}
+
+/** 单个失败项，id 用于重跑时作为目标子集下发 */
+export type StageOutputFailedItem = {
+  id: string
+  label: string
 }
 
 export type Stage = {

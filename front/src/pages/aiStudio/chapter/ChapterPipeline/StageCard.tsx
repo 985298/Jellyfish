@@ -6,6 +6,7 @@ import {
   CloseCircleOutlined,
   PlayCircleOutlined,
   ReloadOutlined,
+  StopOutlined,
 } from '@ant-design/icons'
 import { useState, useCallback, useEffect } from 'react'
 import type { Stage, StageKey } from './types'
@@ -57,9 +58,24 @@ export type StageCardProps = {
   onRun: (key: StageKey) => void
   projectId?: string
   chapterId?: string
+  /** 中止当前阶段（阶段正在进行时显示） */
+  onStop?: (key: StageKey) => void
+  /** 仅重试该阶段的失败项 */
+  onRetryFailed?: (key: StageKey) => void
 }
 
-export function StageCard({ stage, index, canRun, busy, externalLink, onRun, projectId, chapterId }: StageCardProps) {
+export function StageCard({
+  stage,
+  index,
+  canRun,
+  busy,
+  externalLink,
+  onRun,
+  projectId,
+  chapterId,
+  onStop,
+  onRetryFailed,
+}: StageCardProps) {
   const meta = STATUS_META[stage.status] || STATUS_META.not_started
   const isRunning = stage.status === 'running'
   const isDone = stage.status === 'done'
@@ -71,6 +87,11 @@ export function StageCard({ stage, index, canRun, busy, externalLink, onRun, pro
       ? `产出 ${output.count ?? 0}/${output.total} ${output.label || ''}`.trim()
       : `产出 ${output.count ?? 0} ${output.label || ''}`.trim()
     : null
+  // 失败明细：既有简短计数标签，也有用于 Tooltip 的清单
+  const failedItems = output?.failedItems ?? []
+  const failedItemLabels = failedItems.length
+    ? failedItems.map((item) => item.label).join('、')
+    : ''
 
   // U6：产出详情抽屉
   const [detailOpen, setDetailOpen] = useState(false)
@@ -168,6 +189,20 @@ export function StageCard({ stage, index, canRun, busy, externalLink, onRun, pro
       </div>
       <div className="flex items-center gap-2 ml-2">
         {externalLink}
+        {isRunning && onStop ? (
+          <Tooltip title="中止该阶段并取消已提交的任务">
+            <Button size="small" danger icon={<StopOutlined />} onClick={() => onStop(stage.key)}>
+              中止
+            </Button>
+          </Tooltip>
+        ) : null}
+        {failedItems.length > 0 && onRetryFailed && !isRunning ? (
+          <Tooltip title={failedItemLabels || undefined}>
+            <Button size="small" icon={<ReloadOutlined />} disabled={busy} onClick={() => onRetryFailed(stage.key)}>
+              仅重试失败项（{failedItems.length}）
+            </Button>
+          </Tooltip>
+        ) : null}
         {isFailed ? (
           <Button
             size="small"
