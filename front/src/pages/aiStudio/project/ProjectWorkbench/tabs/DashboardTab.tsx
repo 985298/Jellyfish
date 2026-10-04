@@ -58,6 +58,8 @@ export function DashboardTab({ onSelectTab }: { onSelectTab: (tab: TabKey) => vo
   })
   const [chapterFlowStats, setChapterFlowStats] = useState<ChapterFlowStats[]>([])
   const [flowStatsLoading, setFlowStatsLoading] = useState(false)
+  const screens = useBreakpoint()
+  const isMobile = !screens.md
 
   const loading = projectLoading || chaptersLoading
   const chaptersByIndex = [...chapters].sort((a, b) => a.index - b.index)
@@ -135,9 +137,6 @@ export function DashboardTab({ onSelectTab }: { onSelectTab: (tab: TabKey) => vo
   const topPendingChapter = [...chapterFlowStats].sort((a, b) => b.pendingConfirmShots - a.pendingConfirmShots)[0]
   const topGeneratingChapter = [...chapterFlowStats].sort((a, b) => b.generatingShots - a.generatingShots)[0]
   const topReadyChapter = [...chapterFlowStats].sort((a, b) => b.readyShots - a.readyShots)[0]
-
-  const screens = useBreakpoint()
-  const isMobile = !screens.md
 
   const handleRecommendedAction = () => {
     if (!projectId) return
