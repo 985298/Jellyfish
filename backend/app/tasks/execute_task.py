@@ -11,7 +11,8 @@ from __future__ import annotations
 import logging
 import os
 import threading
-from concurrent.futures import ThreadPoolExecutor
+import time
+from datetime import datetime, timedelta
 
 from celery.result import AsyncResult
 
@@ -23,11 +24,41 @@ from app.services.worker.task_registry import task_executor_registry
 logger = logging.getLogger(__name__)
 
 
-# 进程内回退执行器：当 Celery worker 不在线时，任务在这里跑。
-# 原实现为每次请求新建一个 daemon 线程，无任何上限——视频生成并发发起时
-# 会同时拉起 N 条线程，每条都向供应商发起长轮询 + 大文件下载，
-# 把事件循环 / 出站连接 / 内存打爆。这里用有界线程池做并发控制。
-# 上限可通过环境变量 JELLYFISH_IN_PROCESS_CONCURRENCY 覆盖，默认 4。
+# ==================== Celery 探活缓存 (30s TTL) ====================
+# 避免每个任务都阻塞 5s 等待 inspect.ping()
+_CELERY_PROBE_TTL_SECONDS = 30.0
+_celery_probe_lock = threading.Lock()
+_celery_probe_result: tuple[bool, float] | None = None
+
+
+def _is_celery_worker_alive() -> bool:
+    """检查 Celery worker 是否在线，结果缓存 30s。
+
+    原实现在每次派发前都同步 inspect.ping(timeout=5)：没有 worker 时每个任务
+    白等 5 秒，批量提交 100 个任务光探活就要 500 秒，前端表现为"提交中卡住"。
+    这里缓存探活结论，30s 内复用，避免把提交路径阻塞住。
+    """
+    global _celery_probe_result
+    now = time.monotonic()
+    cached = _celery_probe_result
+    if cached is not None and (now - cached[1]) < _CELERY_PROBE_TTL_SECONDS:
+        return cached[0]
+    with _celery_probe_lock:
+        cached = _celery_probe_result
+        if cached is not None and (time.monotonic() - cached[1]) < _CELERY_PROBE_TTL_SECONDS:
+            return cached[0]
+        alive = False
+        try:
+            alive = bool(celery_app.control.inspect(timeout=5).ping())
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Celery worker probe failed: %s", exc)
+            alive = False
+        _celery_probe_result = (alive, time.monotonic())
+        logger.info("Celery worker probe: alive=%s", alive)
+        return alive
+
+
+# ==================== 进程内回退执行器 ====================
 def _resolve_in_process_concurrency() -> int:
     raw = os.environ.get("JELLYFISH_IN_PROCESS_CONCURRENCY")
     if raw is None or not str(raw).strip():
@@ -41,12 +72,14 @@ def _resolve_in_process_concurrency() -> int:
 
 
 _IN_PROCESS_CONCURRENCY = _resolve_in_process_concurrency()
-_in_process_executor = ThreadPoolExecutor(
-    max_workers=_IN_PROCESS_CONCURRENCY,
-    thread_name_prefix="jellyfish-task",
-)
+# 用信号量限流 + 每任务独立 daemon 线程，替代 ThreadPoolExecutor。
+# ThreadPoolExecutor 在 max_workers=4 时会出现队列调度卡死（worker 空闲但不取
+# 队列里下一个任务），导致 fan-out 阶段最后几个任务永远 pending。
+_in_process_semaphore = threading.Semaphore(_IN_PROCESS_CONCURRENCY)
 _in_process_lock = threading.Lock()
-_in_process_running: set[str] = set()
+# 改用 dict 记录 task_id -> 入队时间戳，支持 TTL 清理。
+_in_process_running: dict[str, float] = {}
+_IN_PROCESS_DEDUP_TTL_SECONDS = 600.0
 
 
 def _record_executor_dispatch(task_id: str, *, executor_type: str, executor_task_id: str | None) -> None:
@@ -59,44 +92,76 @@ def _record_executor_dispatch(task_id: str, *, executor_type: str, executor_task
         db.commit()
 
 
+def _mark_task_failed(task_id: str, reason: str) -> None:
+    """将任务标记为 failed，防止孤儿 pending。"""
+    with sync_session_maker() as db:
+        row = db.get(GenerationTask, task_id)
+        if row is None:
+            return
+        if row.status == "pending":
+            row.status = "failed"
+            row.error = reason[:500] if reason else "Unknown error"
+            row.finished_at = datetime.utcnow()
+            db.commit()
+            logger.warning("Marked task %s as failed: %s", task_id, reason)
+
+
 def enqueue_task_execution(task_id: str) -> AsyncResult:
-    # 检测 Celery worker 是否在线；不在线则回退到进程内有界线程池执行
-    try:
-        inspect = celery_app.control.inspect(timeout=5)
-        ping_result = inspect.ping()
-        if not ping_result:
-            raise RuntimeError("No Celery worker responding")
-        async_result = run_task_celery.delay(task_id)
-    except Exception as exc:
-        logger.warning("Celery dispatch failed for task %s: %s — falling back to in-process execution", task_id, exc)
-        # 同一 task_id 重复提交时去重，避免线程池里堆积同一任务的多个副本
-        # （前端重试 / 双击 / SSE 重连都会触发）。
+    """分发任务执行：优先 Celery，失败则回退到进程内线程池。"""
+    worker_alive = _is_celery_worker_alive()
+
+    if not worker_alive:
+        logger.warning("No Celery worker available for task %s — falling back to in-process execution", task_id)
         with _in_process_lock:
+            now = time.monotonic()
+            # TTL 清理：僵尸 task_id 清除后重新提交
+            stale = [tid for tid, ts in _in_process_running.items() if now - ts > _IN_PROCESS_DEDUP_TTL_SECONDS]
+            for tid in stale:
+                _in_process_running.pop(tid, None)
+                logger.warning("dedup TTL expired for task %s (was in running set >%ss), re-submitting", tid, _IN_PROCESS_DEDUP_TTL_SECONDS)
             if task_id in _in_process_running:
                 logger.info("in-process task already running: task_id=%s (dedup)", task_id)
                 _record_executor_dispatch(task_id, executor_type="in_process", executor_task_id=None)
                 return AsyncResult(task_id, app=celery_app)
-            _in_process_running.add(task_id)
+            _in_process_running[task_id] = now
 
         def _bg_run() -> None:
             try:
                 run_task_celery(task_id)
-            except Exception:
-                logger.exception("in-process task execution failed: task_id=%s", task_id)
+            except Exception as e:
+                logger.exception("in-process task execution failed: task_id=%s, error=%s", task_id, e)
+                _mark_task_failed(task_id, f"In-process execution failed: {str(e)[:200]}")
             finally:
                 with _in_process_lock:
-                    _in_process_running.discard(task_id)
+                    _in_process_running.pop(task_id, None)
 
-        _in_process_executor.submit(_bg_run)
-        _record_executor_dispatch(task_id, executor_type="in_process", executor_task_id=None)
+        # 每任务独立 daemon 线程 + 信号量限流，替代 ThreadPoolExecutor
+        def _bg_run_with_semaphore() -> None:
+            _in_process_semaphore.acquire()
+            try:
+                _bg_run()
+            finally:
+                _in_process_semaphore.release()
+
+        try:
+            t = threading.Thread(target=_bg_run_with_semaphore, name=f"jellyfish-task-{task_id[:8]}", daemon=True)
+            t.start()
+            _record_executor_dispatch(task_id, executor_type="in_process", executor_task_id=None)
+            return AsyncResult(task_id, app=celery_app)
+        except Exception as submit_err:
+            logger.error("Failed to start in-process task %s: %s", task_id, submit_err)
+            _mark_task_failed(task_id, f"Failed to start thread: {str(submit_err)}")
+            return AsyncResult(task_id, app=celery_app)
+
+    # Celery worker 在线，正常派发
+    try:
+        async_result = run_task_celery.delay(task_id)
+        _record_executor_dispatch(task_id, executor_type="celery", executor_task_id=async_result.id)
+        return async_result
+    except Exception as exc:
+        logger.error("Celery dispatch failed for task %s: %s", task_id, exc)
+        _mark_task_failed(task_id, f"Celery dispatch failed: {str(exc)[:200]}")
         return AsyncResult(task_id, app=celery_app)
-
-    _record_executor_dispatch(
-        task_id,
-        executor_type="celery",
-        executor_task_id=async_result.id,
-    )
-    return async_result
 
 
 def revoke_task_execution(task_id: str, *, terminate: bool = True, signal: str = "SIGTERM") -> bool:
@@ -116,6 +181,42 @@ def revoke_task_execution(task_id: str, *, terminate: bool = True, signal: str =
         logger.exception("failed to revoke celery task: task_id=%s executor_task_id=%s", task_id, executor_task_id)
         return False
     return True
+
+
+# ==================== 启动时 Reaper：清理历史孤儿任务 ====================
+def reaper_pending_tasks(threshold_minutes: int = 5) -> int:
+    """
+    清理超过 threshold_minutes 分钟仍处于 pending 或 running 状态的任务。
+    这些任务很可能是进程重启后留下的孤儿。
+    返回被清理的任务数量。
+    """
+    cleaned_count = 0
+    cutoff = datetime.utcnow() - timedelta(minutes=threshold_minutes)
+    
+    with sync_session_maker() as db:
+        orphan_rows = (
+            db.query(GenerationTask)
+            .filter(
+                GenerationTask.status.in_(["pending", "running"]),
+                GenerationTask.executor_type == "in_process",
+                GenerationTask.created_at < cutoff,
+            )
+            .all()
+        )
+        
+        for row in orphan_rows:
+            old_status = row.status
+            row.status = "failed"
+            row.error = f"Cleaned: orphan task (was {old_status} for >{threshold_minutes}min)"
+            row.finished_at = datetime.utcnow()
+            cleaned_count += 1
+            logger.warning("Reaped orphan task %s: was %s, created at %s", row.id, old_status, row.created_at)
+        
+        if cleaned_count > 0:
+            db.commit()
+            logger.info("Reaper completed: cleaned %d orphan tasks", cleaned_count)
+    
+    return cleaned_count
 
 
 @celery_app.task(name="task.execute")

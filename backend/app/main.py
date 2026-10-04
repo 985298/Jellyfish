@@ -14,6 +14,7 @@ from app.agents.api_routes import router as agents_router
 from app.bootstrap import bootstrap_all_registries
 from app.config import settings
 from app.core.storage import init_storage
+from app.tasks.execute_task import reaper_pending_tasks
 from app.schemas.common import ApiResponse
 
 
@@ -77,6 +78,15 @@ async def lifespan(app: FastAPI):
         init_storage()
     except Exception as e:
         print(f"[startup] S3 init warning: {e}")
+
+    # 启动时清理历史孤儿任务：in_process 任务随进程重启必然已死，
+    # 若不回收，它们的状态会永远停在 pending，前端表现为阶段卡在 90%。
+    try:
+        cleaned = reaper_pending_tasks(5)
+        if cleaned:
+            print(f"[startup] Reaped {cleaned} orphan tasks")
+    except Exception as e:
+        print(f"[startup] Reaper warning: {e}")
     yield
     # 关闭时：清理资源
     pass

@@ -49,6 +49,11 @@ class _AsyncSessionMakerProxy:
         return self._maker(*args, **kwargs)
 
 
+import threading as _threading
+
+_db_runtime_lock = _threading.Lock()
+_db_runtime_initialized = False
+
 engine = _build_engine()
 async_session_maker = _AsyncSessionMakerProxy(_build_session_maker(engine))
 
@@ -77,13 +82,20 @@ async def close_db() -> None:
 
 
 def reset_db_runtime() -> None:
-    """在 Celery worker 子进程中重建 engine 与 sessionmaker。
+    """重建 engine 与 sessionmaker（线程安全 + 幂等）。
 
-    这样可以避免 prefork 继承父进程中的 async engine，导致连接对象和事件循环
-    绑定错乱，触发 Future attached to a different loop。
+    原实现在多线程并发调用时无锁保护：
+    - 线程 A 替换全局 engine 后，线程 B 的 close_db() 可能把它 dispose 掉
+    - 导致 A 的 DB 操作永久卡死，任务停在 pending
+
+    修复：加锁 + 幂等。只在第一次调用时重建，后续直接返回。
+    进程内回退模式下 engine 在模块导入时已建好，无需每任务重建。
     """
+    global engine, _db_runtime_initialized
 
-    global engine
-
-    engine = _build_engine()
-    async_session_maker.configure(_build_session_maker(engine))
+    with _db_runtime_lock:
+        if _db_runtime_initialized:
+            return
+        engine = _build_engine()
+        async_session_maker.configure(_build_session_maker(engine))
+        _db_runtime_initialized = True
