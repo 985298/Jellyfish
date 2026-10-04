@@ -404,7 +404,13 @@ async function runKeyframes(ctx: PipelineCtx, opts?: RunOptions): Promise<ExecRe
       const fr = await fetch(`/api/v1/studio/image-tasks/shot/${shot.id}/frame-image-tasks`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ frame_type: 'first', model_id: null }),
+        body: JSON.stringify({
+          frame_type: 'first',
+          model_id: null,
+          // 后端 required 字段：prompt 用镜头剧文兜底，target_ratio 默认竖屏 9:16
+          prompt: shot.script_excerpt || shot.title || '',
+          target_ratio: '9:16',
+        }),
       })
       const fd = await fr.json()
       return fd?.data?.task_id ?? null
