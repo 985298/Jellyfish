@@ -86,8 +86,9 @@ export default function ChapterPipeline() {
   const { projectId, chapterId } = useParams<{ projectId?: string; chapterId?: string }>()
   const [runPolicy, setRunPolicy] = useState<RunPolicy>('step')
   /** fan-out 阶段（资产图片/帧图/视频）每批提交的任务数。
-   *  后端并发上限为 4，分批是为了不让几十个任务一次性压上去、也便于中止与失败定位。 */
-  const [batchSize, setBatchSize] = useState<number>(5)
+   *  默认 999 = 一次性全部提交，用后端自己的并发控制排队。
+   *  用户可切到 1/3/5/10 做手动分批（便于中止与失败定位）。 */
+  const [batchSize, setBatchSize] = useState<number>(999)
   const [loading, setLoading] = useState(false)
   const [chapterTitle, setChapterTitle] = useState('')
   const [scriptText, setScriptText] = useState('')
@@ -313,17 +314,18 @@ export default function ChapterPipeline() {
               ]}
             />
           </Tooltip>
-          <Tooltip title="资产图片/帧图/视频会按此数量分批提交并批内并发轮询。后端并发上限约 4，数值越大跑得越猛但更容易触发限流">
+          <Tooltip title="资产图片/帧图/视频会按此数量分批提交并批内并发轮询。默认「全部」=一次性提交全部任务，用后端自己的并发控制排队">
             <Space size={4}>
               <span className="text-xs text-gray-500">每批</span>
               <Segmented
-                value={batchSize}
+                value={batchSize >= 999 ? 999 : batchSize}
                 onChange={(v) => setBatchSize(Number(v))}
                 options={[
-                  { label: '1', value: 1 },
-                  { label: '3', value: 3 },
-                  { label: '5', value: 5 },
+                  { label: '全部', value: 999 },
                   { label: '10', value: 10 },
+                  { label: '5', value: 5 },
+                  { label: '3', value: 3 },
+                  { label: '1', value: 1 },
                 ]}
               />
             </Space>

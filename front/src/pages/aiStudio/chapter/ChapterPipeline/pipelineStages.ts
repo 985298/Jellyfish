@@ -23,8 +23,9 @@ export type RunOptions = {
   batchSize?: number
 }
 
-/** 默认每批任务数。后端并发上限为 4，这里取 5 留出余量又不至于堆积太多。 */
-const DEFAULT_BATCH_SIZE = 5
+/** 默认每批任务数。设为 999 = 一次性提交全部，用后端自己的并发控制排队。
+ *  用户可在界面切到 1/3/5/10 做手动分批，但默认行为是全量并发。 */
+const DEFAULT_BATCH_SIZE = 999
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 // Task result payloads are intentionally typed as `any` because the backend
