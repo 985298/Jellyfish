@@ -187,6 +187,17 @@ class ScriptDividerAgent(AgentBase[ScriptDivisionResult]):
                 shot_dict.pop("character_names_in_text", None)
                 shot_dict.pop("character_ids", None)
                 # 丢弃 LLM 可能多输出的字段（如画面过程描述、核心创意等中文字段名）
+                # 兜底：LLM 可能把 Agnes 三段式拆成独立中文字段而非写入单一 description（Hubble P1）
+                if not shot_dict.get("description"):
+                    _parts = []
+                    for _k in ("参考素材说明", "核心创意", "画面过程描述"):
+                        _v = shot_dict.get(_k)
+                        if _v:
+                            _parts.append("【%s】\n%s" % (_k, _v))
+                    if _parts:
+                        shot_dict["description"] = "\n\n".join(_parts)
+                    else:
+                        raise ValueError("shot %d missing Agnes description" % shot_dict.get("index", idx + 1))
                 _ALLOWED = {"index", "start_line", "end_line", "script_excerpt", "shot_name",
                             "time_of_day", "duration", "camera_shot", "angle", "movement",
                             "description", "character_names", "scene_name"}

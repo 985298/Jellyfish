@@ -177,9 +177,11 @@ async def build_asset_list_text(db: AsyncSession, project_id: str) -> str:
                 CharacterImage.file_id.isnot(None),
             ).limit(1)
         )).first()
-        has_img = "has_ref" if img else "no_ref"
-        char_parts.append("%s(@图片%d, %s, %s)" % (char.name, img_num, desc, has_img))
-        img_num += 1
+        if img:
+            char_parts.append("%s(@图片%d, %s, has_ref)" % (char.name, img_num, desc))
+            img_num += 1
+        else:
+            char_parts.append("%s(%s, no_ref)" % (char.name, desc))
     if char_parts:
         lines.append("角色（分镜时必须使用以上名称）：" + "、".join(char_parts))
 
@@ -197,9 +199,11 @@ async def build_asset_list_text(db: AsyncSession, project_id: str) -> str:
                 SceneImage.file_id.isnot(None),
             ).limit(1)
         )).first()
-        has_img = "has_ref" if img else "no_ref"
-        scene_parts.append("%s(@图片%d, %s, %s)" % (scene.name, img_num, desc, has_img))
-        img_num += 1
+        if img:
+            scene_parts.append("%s(@图片%d, %s, has_ref)" % (scene.name, img_num, desc))
+            img_num += 1
+        else:
+            scene_parts.append("%s(%s, no_ref)" % (scene.name, desc))
     if scene_parts:
         lines.append("场景（分镜时必须使用以上名称）：" + "、".join(scene_parts))
 
@@ -224,9 +228,11 @@ def build_asset_list_text_sync(db, project_id: str) -> str:
                 CharacterImage.file_id.isnot(None),
             ).limit(1)
         ).first()
-        has_img = "has_ref" if img else "no_ref"
-        char_parts.append("%s(@图片%d, %s, %s)" % (char.name, img_num, desc, has_img))
-        img_num += 1
+        if img:
+            char_parts.append("%s(@图片%d, %s, has_ref)" % (char.name, img_num, desc))
+            img_num += 1
+        else:
+            char_parts.append("%s(%s, no_ref)" % (char.name, desc))
     if char_parts:
         lines.append("角色（分镜时必须使用以上名称）：" + "、".join(char_parts))
 
@@ -243,9 +249,11 @@ def build_asset_list_text_sync(db, project_id: str) -> str:
                 SceneImage.file_id.isnot(None),
             ).limit(1)
         ).first()
-        has_img = "has_ref" if img else "no_ref"
-        scene_parts.append("%s(@图片%d, %s, %s)" % (scene.name, img_num, desc, has_img))
-        img_num += 1
+        if img:
+            scene_parts.append("%s(@图片%d, %s, has_ref)" % (scene.name, img_num, desc))
+            img_num += 1
+        else:
+            scene_parts.append("%s(%s, no_ref)" % (scene.name, desc))
     if scene_parts:
         lines.append("场景（分镜时必须使用以上名称）：" + "、".join(scene_parts))
 
