@@ -169,7 +169,7 @@ async def build_asset_list_text(db: AsyncSession, project_id: str) -> str:
 
     char_parts = []
     for char in chars:
-        desc = (char.description or "")[:60]
+        desc = (char.description or "")[:200]
         # Check if character has a reference image
         img = (await db.execute(
             select(CharacterImage.file_id).where(
@@ -190,7 +190,7 @@ async def build_asset_list_text(db: AsyncSession, project_id: str) -> str:
 
     scene_parts = []
     for scene in scenes:
-        desc = (scene.description or "")[:60]
+        desc = (scene.description or "")[:200]
         img = (await db.execute(
             select(SceneImage.file_id).where(
                 SceneImage.scene_id == scene.id,
@@ -217,7 +217,7 @@ def build_asset_list_text_sync(db, project_id: str) -> str:
 
     char_parts = []
     for char in chars:
-        desc = (char.description or "")[:60]
+        desc = (char.description or "")[:200]
         img = db.execute(
             select(CharacterImage.file_id).where(
                 CharacterImage.character_id == char.id,
@@ -236,7 +236,7 @@ def build_asset_list_text_sync(db, project_id: str) -> str:
 
     scene_parts = []
     for scene in scenes:
-        desc = (scene.description or "")[:60]
+        desc = (scene.description or "")[:200]
         img = db.execute(
             select(SceneImage.file_id).where(
                 SceneImage.scene_id == scene.id,

@@ -66,10 +66,17 @@ class DivideResultGenerator(AbstractLLMResultGenerator):
         project_id = str(run_args.get("project_id") or "")
         asset_list = ""
         aspect_ratio = "9:16"
-        if project_id:
-            from app.core.db_sync import sync_session_maker
-            from app.services.studio.script_division import build_asset_list_text_sync
-            with sync_session_maker() as _db:
+        chapter_id = str(run_args.get("chapter_id") or "")
+        from app.core.db_sync import sync_session_maker
+        with sync_session_maker() as _db:
+            # 兜底：async 生产路径 run_args 不带 project_id，从 chapter_id 解析（Hubble P0-prompt-1）
+            if not project_id and chapter_id:
+                from app.models import Chapter
+                _chapter = _db.get(Chapter, chapter_id)
+                if _chapter is not None:
+                    project_id = str(_chapter.project_id or "")
+            if project_id:
+                from app.services.studio.script_division import build_asset_list_text_sync
                 asset_list = build_asset_list_text_sync(_db, project_id)
                 _proj = _db.get(Project, project_id)
                 if _proj and getattr(_proj, "default_video_ratio", None):
