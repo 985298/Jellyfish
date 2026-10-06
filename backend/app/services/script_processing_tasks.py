@@ -760,7 +760,7 @@ def spawn_asset_extract_task(task_id: str) -> None:
 
 # === 资产绑定（已废弃） ===
 # bind_assets 全链已移除：分镜输出自带 character_names/scene_name，
-# 绑定在 divide_shots 阶段由 apply_division_result 自动完成。
+# 绑定在 divide_shots 阶段由 _append_division_rows 写 ShotCharacterLink + ShotDetail.scene_id 完成（2026-10-07 实现，清 drift #5）。
 # create_asset_bind_task / spawn_asset_bind_task 已连同路由、Agent 工具、
 # worker executor 一起删除。历史 task_kind='script_asset_bind' 任务记录
 # 仍保留在 generation_tasks 表中，仅作为历史数据存在。

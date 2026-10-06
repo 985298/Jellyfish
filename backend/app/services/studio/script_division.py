@@ -19,6 +19,7 @@ from app.models.studio import (
     Scene,
     SceneImage,
     Shot,
+    ShotCharacterLink,
     ShotDetail,
     VFXType,
 )
@@ -79,7 +80,11 @@ def _append_division_rows(
     *,
     chapter_id: str,
     result: ScriptDivisionResult,
+    character_name_to_id: dict[str, str] | None = None,
+    scene_name_to_id: dict[str, str] | None = None,
 ) -> None:
+    character_name_to_id = character_name_to_id or {}
+    scene_name_to_id = scene_name_to_id or {}
     for shot_division in result.shots:
         title = (shot_division.shot_name or "").strip() or f"镜头 {shot_division.index}"
         shot_id = str(uuid.uuid4())
@@ -92,10 +97,13 @@ def _append_division_rows(
                 script_excerpt=shot_division.script_excerpt,
             )
         )
+        _scene_name = getattr(shot_division, "scene_name", None)
+        _scene_id = scene_name_to_id.get(_scene_name) if _scene_name else None
         db_add(
             ShotDetail(
                 id=shot_id,
                 description=shot_division.description,
+                scene_id=_scene_id,
                 camera_shot=_normalize_enum(getattr(shot_division, 'camera_shot', None), _CAMERA_SHOT_CN_MAP, CameraShotType, CameraShotType.ms),
                 angle=_normalize_enum(getattr(shot_division, 'angle', None), _CAMERA_ANGLE_CN_MAP, CameraAngle, CameraAngle.eye_level),
                 movement=_normalize_enum(getattr(shot_division, 'movement', None), _CAMERA_MOVEMENT_CN_MAP, CameraMovement, CameraMovement.static),
@@ -104,6 +112,11 @@ def _append_division_rows(
                 duration=getattr(shot_division, 'duration', 6) or 6,
             )
         )
+        # 绑定角色：character_names → ShotCharacterLink（Hubble P0-prompt-2，清 drift #5）
+        for _ci, _cname in enumerate(shot_division.character_names or []):
+            _cid = character_name_to_id.get(_cname)
+            if _cid:
+                db_add(ShotCharacterLink(shot_id=shot_id, character_id=_cid, index=_ci))
 
 
 async def write_division_result_to_chapter(
@@ -128,7 +141,12 @@ async def write_division_result_to_chapter(
             detail="Chapter already has shots; refusing to write (write_strategy=fail)",
         )
 
-    _append_division_rows(db.add, chapter_id=chapter_id, result=result)
+    # 构建项目内 name→id 映射，传入 _append_division_rows 做角色/场景绑定（Hubble P0-prompt-2）
+    _chapter = await db.get(Chapter, chapter_id)
+    _pid = str(_chapter.project_id) if _chapter and _chapter.project_id else ""
+    _char_map = {c.name: c.id for c in (await db.execute(select(Character).where(Character.project_id == _pid))).scalars().all()} if _pid else {}
+    _scene_map = {s.name: s.id for s in (await db.execute(select(Scene).where(Scene.project_id == _pid))).scalars().all()} if _pid else {}
+    _append_division_rows(db.add, chapter_id=chapter_id, result=result, character_name_to_id=_char_map, scene_name_to_id=_scene_map)
 
     # 触发唯一约束与外键检查，确保在返回前失败。
     await db.flush()
@@ -151,7 +169,11 @@ def write_division_result_to_chapter_sync(
             detail="Chapter already has shots; refusing to write (write_strategy=fail)",
         )
 
-    _append_division_rows(db.add, chapter_id=chapter_id, result=result)
+    # 构建项目内 name→id 映射（Hubble P0-prompt-2）
+    _pid = str(chapter.project_id) if chapter and chapter.project_id else ""
+    _char_map = {c.name: c.id for c in db.execute(select(Character).where(Character.project_id == _pid)).scalars().all()} if _pid else {}
+    _scene_map = {s.name: s.id for s in db.execute(select(Scene).where(Scene.project_id == _pid)).scalars().all()} if _pid else {}
+    _append_division_rows(db.add, chapter_id=chapter_id, result=result, character_name_to_id=_char_map, scene_name_to_id=_scene_map)
     db.flush()
 
 
