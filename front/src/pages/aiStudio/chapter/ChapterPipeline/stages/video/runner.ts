@@ -22,7 +22,8 @@ export async function runVideos(ctx: PipelineCtx, opts?: RunOptions): Promise<Ex
           // 后端枚举值：first/last/key/first_last/first_last_key/text_only
           // 原前端传 'first_frame' 会 422
           reference_mode: 'first',
-          ratio: '9:16',
+          // ratio 从项目 default_video_ratio 读（ctx.projectRatio），换横屏项目自动适配
+          ratio: (ctx.projectRatio || '9:16') as '16:9' | '4:3' | '1:1' | '3:4' | '9:16' | '21:9',
           prompt: '',
         },
       })

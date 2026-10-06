@@ -37,6 +37,9 @@ DEFAULT_VIDEO_NEGATIVE_PROMPT = (
 )
 
 
+
+
+
 def _enum_value(value: Any) -> str:
     if value is None:
         return ""
@@ -63,6 +66,7 @@ def _pack_variables(pack: ShotVideoPromptPackRead) -> dict[str, Any]:
     return {
         "pack": data,
         "shot_id": pack.shot_id,
+        "description": pack.description,
         "shot_title": pack.title,
         "title": pack.title,
         "script_excerpt": pack.script_excerpt,
@@ -99,23 +103,6 @@ def _render_template(content: str, variables: dict[str, Any]) -> str:
     render_vars = {name: variables.get(name, "") for name in template.input_variables}
     return template.format(**render_vars).strip()
 
-
-def _build_guidance_suffix(pack: ShotVideoPromptPackRead) -> str:
-    """生成一段稳定的镜头执行约束，供模板渲染结果补强使用。"""
-    lines: list[str] = []
-    if pack.action_beats:
-        lines.append(f"动作节拍：{'；'.join(pack.action_beats)}")
-    if pack.previous_shot_summary:
-        lines.append(f"上一镜头承接：{pack.previous_shot_summary}")
-    if pack.next_shot_goal:
-        lines.append(f"下一镜头目标：{pack.next_shot_goal}")
-    if pack.continuity_guidance:
-        lines.append(f"连续性要求：{pack.continuity_guidance}")
-    if pack.composition_anchor:
-        lines.append(f"构图锚点：{pack.composition_anchor}")
-    if pack.screen_direction_guidance:
-        lines.append(f"朝向与视线：{pack.screen_direction_guidance}")
-    return "\n".join(lines).strip()
 
 
 def enrich_rendered_video_prompt(
@@ -366,30 +353,17 @@ def _camera_instruction(pack: ShotVideoPromptPackRead) -> str:
 
 
 def _fallback_video_prompt(pack: ShotVideoPromptPackRead) -> str:
-    style_text = "，".join(x for x in [pack.visual_style, pack.style] if x)
-    camera_text = _camera_instruction(pack)
-    parts = [
-        f"镜头标题：{pack.title}",
-        f"剧本摘录：{pack.script_excerpt}",
-        f"动作节拍：{'；'.join(pack.action_beats)}" if pack.action_beats else "",
-        f"画面风格：{style_text}",
-        f"运镜指令：{camera_text}",
-        f"时长：{pack.camera.duration} 秒" if pack.camera.duration else "",
-        f"场景：{pack.scene.name if pack.scene else ''}",
-        f"角色：{'、'.join(item.name for item in pack.characters)}",
-        f"道具：{'、'.join(item.name for item in pack.props)}",
-        f"服装：{'、'.join(item.name for item in pack.costumes)}",
-        f"对白摘要：{pack.dialogue_summary}",
-        f"上一镜头：{pack.previous_shot_summary}" if pack.previous_shot_summary else "",
-        f"下一镜头目标：{pack.next_shot_goal}" if pack.next_shot_goal else "",
-        f"连续性要求：{pack.continuity_guidance}" if pack.continuity_guidance else "",
-        f"构图锚点：{pack.composition_anchor}" if pack.composition_anchor else "",
-        f"朝向与视线：{pack.screen_direction_guidance}" if pack.screen_direction_guidance else "",
-        f"氛围：{pack.atmosphere}",
-        f"负面约束：{pack.negative_prompt}",
-    ]
-    return "\n".join(part for part in parts if part.split("：", 1)[-1].strip())
-
+    """按 Agnes 文档格式构建：参考素材说明 + 核心创意 + 画面过程 + 声音约束 + 反向。
+    直接用 shot_detail.description（Agnes 三段式），不额外拼装道具/服装/连续性等（避免干扰模型）。"""
+    desc = (pack.description or "").strip()
+    parts: list[str] = []
+    if desc:
+        parts.append(desc)
+    # 声音约束（文档建议明确写）
+    parts.append("▍声音：保留对白和环境音，不要额外添加背景音乐。不要人声旁白。")
+    # 反向约束（防字幕/颠倒/旋转）
+    parts.append("▍反向：不要旋转画面、不要侧翻、不要新增无关人物、不要改变角色身份和服装。")
+    return "\n\n".join(parts)
 
 async def _resolve_video_prompt_template(
     db: AsyncSession,
@@ -479,6 +453,7 @@ async def build_shot_video_prompt_pack(
 
     return ShotVideoPromptPackRead(
         shot_id=shot.id,
+        description=str(getattr(detail, "description", "") or ""),
         title=shot.title or "",
         script_excerpt=shot.script_excerpt or "",
         action_beats=action_beats,

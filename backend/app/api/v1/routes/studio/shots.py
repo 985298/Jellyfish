@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies import get_db
+from app.models.types import ShotFrameType
 from app.services.studio.shot_assets import (
     create_project_asset_link as create_project_asset_link_service,
     delete_project_asset_link as delete_project_asset_link_service,
@@ -626,6 +627,7 @@ async def delete_shot_dialog_line(
 async def list_shot_frame_images(
     db: AsyncSession = Depends(get_db),
     shot_detail_id: str | None = Query(None, description="按镜头细节过滤"),
+    frame_type: ShotFrameType | None = Query(None, description="按帧类型过滤：first/last/key"),
     order: str | None = Query(None),
     is_desc: bool = Query(False),
     page: int = Query(1, ge=1),
@@ -639,6 +641,7 @@ async def list_shot_frame_images(
         page=page,
         page_size=page_size,
         allow_fields=FRAME_IMAGE_ORDER_FIELDS,
+        frame_type=frame_type,
     )
 
 

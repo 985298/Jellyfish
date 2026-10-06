@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 import base64
 import mimetypes
 
@@ -16,6 +18,7 @@ from app.core.contracts.video_generation import VideoGenerationInput, VideoGener
 from app.core.tasks import VideoGenerationTask
 from app.models.llm import Model, ModelCategoryKey, ModelSettings
 from app.models.task_links import GenerationTaskLink
+from app.models.studio_asset_images import CharacterImage
 from app.models.studio import FileItem, Shot, ShotDetail, ShotFrameType
 from app.models.types import FileUsageKind
 from app.services.common import entity_not_found
@@ -28,6 +31,7 @@ from app.services.studio.generation.video import (
     build_video_submission_payload,
     validate_images_count,
 )
+from app.models.studio_assets import Character
 from app.services.studio.shot_status import recompute_shot_status
 from app.services.worker.async_task_support import cancel_if_requested_async
 from app.services.worker.task_logging import log_task_event, log_task_failure
@@ -45,7 +49,7 @@ async def validate_shot_and_duration(db: AsyncSession, shot_id: str) -> ShotDeta
     return shot_detail
 
 
-async def file_id_to_data_url(db: AsyncSession, *, file_id: str) -> str:
+async def file_id_to_url(db: AsyncSession, *, file_id: str) -> str:
     """将 file_id 对应的图片转为 data URL。
 
     视频生成端点（自建 Agnes API）接收 base64 图片作为 input_reference，
@@ -56,6 +60,9 @@ async def file_id_to_data_url(db: AsyncSession, *, file_id: str) -> str:
     file_obj = await db.get(FileItem, file_id)
     if file_obj is None or not file_obj.storage_key:
         raise HTTPException(status_code=400, detail=f"Invalid image file_id: {file_id}")
+    _sk = file_obj.storage_key
+    if isinstance(_sk, str) and (_sk.startswith("https://") or _sk.startswith("http://")):
+        return _sk
     try:
         content = await storage.download_file(key=file_obj.storage_key)
     except Exception:  # noqa: BLE001
@@ -178,6 +185,45 @@ async def resolve_effective_video_options(
     return req_ratio
 
 
+def _sanitize_prompt_for_vertical(prompt: str, char_names: list[str] | None = None) -> str:
+    """官方格式 + 画幅兜底 + 景别清洗 + 台词"说:「" + @图片X 按 images 顺序重编号。"""
+    import re
+    # 画幅兜底：历史数据可能写 16:9横版，强制改竖版（数据不丢失，只换画幅指示词）
+    prompt = re.sub(r"16:9横版", "9:16竖版", prompt)
+    prompt = re.sub(r"16:9 横版", "9:16 竖版", prompt)
+    prompt = re.sub(r"横版", "竖版", prompt)
+    # 景别清洗（防横屏构图）
+    prompt = re.sub(r"广角全景", "中近景特写", prompt)
+    prompt = re.sub(r"大全景", "中景", prompt)
+    prompt = re.sub(r"全景保持", "中近景保持", prompt)
+    prompt = re.sub(r"全景，", "中近景，", prompt)
+    prompt = re.sub(r"宴会厅全貌", "宴会厅局部", prompt)
+    prompt = re.sub(r"长条宴桌坐满宾客", "宴桌一角，数位宾客入画", prompt)
+    prompt = re.sub(r"长条宴桌", "宴桌", prompt)
+    # 台词官方"说：「"格式
+    prompt = re.sub(r"台词：「", "说:「", prompt)
+    # 删剧本自带字幕
+    prompt = re.sub(r"[^。\n]*字幕[^。\n]*。", "", prompt)
+    # @图片X 重映射：按 char_names 顺序重编号（@图片N=images[N-1]）
+    if char_names:
+        # 提取 @图片X + 对应角色（锁定X的外貌）
+        refs = re.findall(r"@图片(\d+) 作为人物参考，锁定(.+?)的外貌", prompt)
+        # 建立角色→新编号映射
+        remap = {}
+        for old_num, name in refs:
+            if name in char_names:
+                new_num = char_names.index(name) + 1
+                remap[f"@图片{old_num}"] = f"@图片{new_num}"
+        # 倒序替换避免编号冲突
+        for old, new in sorted(remap.items(), key=lambda x: -int(x[0][3:])):
+            prompt = prompt.replace(old, new)
+        # 删超出 images 范围的 @图片X（场景等，无对应 reference）
+        for m in re.findall(r"@图片(\d+)", prompt):
+            if int(m) > len(char_names):
+                prompt = prompt.replace(f"@图片{m}", "")
+    return prompt
+
+
 async def build_run_args(
     db: AsyncSession,
     *,
@@ -201,13 +247,21 @@ async def build_run_args(
     submission = await build_video_submission_payload(db, base=base, context=context)
     validate_images_count(reference_mode, submission.images)
 
-    final_prompt = submission.prompt.strip()
+    # 查 images 对应角色名（按 submission.images 顺序）
+    _char_names = []
+    for _fid in submission.images:
+        _ci = (await db.execute(select(CharacterImage).where(CharacterImage.file_id == _fid))).scalars().first()
+        if _ci:
+            _ch = await db.get(Character, _ci.character_id)
+            if _ch:
+                _char_names.append(_ch.name)
+    cleaned_prompt = _sanitize_prompt_for_vertical(submission.prompt, _char_names)
+    final_prompt = cleaned_prompt.strip()
     if not final_prompt:
         raise HTTPException(status_code=400, detail="prompt is required")
 
-    required_frames = tuple(ShotFrameType(item) for item in REQUIRED_FRAMES_BY_MODE[reference_mode])
-    frame_data_urls = [await file_id_to_data_url(db, file_id=file_id) for file_id in submission.images]
-    frame_map = {ft: frame_data_urls[i] for i, ft in enumerate(required_frames)}
+    # 治本：多图 reference，传所有角色 primary 图 URL（按 resolve 顺序，对应 prompt @图片X）
+    image_urls = [await file_id_to_url(db, file_id=file_id) for file_id in submission.images]
 
     run_args = {
         "shot_id": shot_id,
@@ -216,9 +270,7 @@ async def build_run_args(
         "base_url": provider_cfg.base_url,
         "input": {
             "prompt": final_prompt,
-            "first_frame_base64": frame_map.get(ShotFrameType.first),
-            "last_frame_base64": frame_map.get(ShotFrameType.last),
-            "key_frame_base64": frame_map.get(ShotFrameType.key),
+            "images": image_urls,
             "model": model.name,
             "ratio": resolved_ratio,
             "seconds": shot_detail.duration,

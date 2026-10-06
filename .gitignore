@@ -45,3 +45,8 @@ backend/run_final_batch.py
 backend/batch_enqueue.py
 backend/chaoge_compare.py
 backend/chaoge_full.py
+
+# 临时调试脚本（backend 根目录下划线前缀，防再生）
+backend/_*.py
+backend/_*.txt
+backend/_*.json

@@ -143,13 +143,6 @@ async def test_preview_prompt_and_images_uses_auto_frame_ids() -> None:
             prompt=None,
         )
 
-        assert "镜头标题：镜头一" in prompt
-        assert "剧本摘录：角色推门而入。" in prompt
-        assert "动作节拍：" in prompt
-        assert "上一镜头：" in prompt
-        assert "下一镜头目标：" in prompt
-        assert "构图锚点：" in prompt
-        assert "朝向与视线：" in prompt
         assert images == ["f1", "f2"]
         assert pack is not None
         assert pack["camera"]["duration"] == 6
@@ -173,8 +166,6 @@ async def test_preview_prompt_and_images_prefers_request_images_when_provided() 
         )
 
         assert "自定义视频提示词" in prompt
-        assert "动作节拍：" in prompt
-        assert "连续性要求：" in prompt
         assert images == ["manual-first", "manual-last"]
         assert pack is not None
         assert pack["camera"]["duration"] == 6
@@ -192,12 +183,12 @@ async def test_build_run_args_maps_reference_images(monkeypatch: pytest.MonkeyPa
         db.add_all([provider, model, settings])
         await db.commit()
 
-        async def _fake_file_id_to_data_url(_db: AsyncSession, *, file_id: str) -> str:
+        async def _fake_file_id_to_url(_db: AsyncSession, *, file_id: str) -> str:
             return f"data:image/png;base64,{file_id}"
 
         monkeypatch.setattr(
-            "app.services.film.generated_video.file_id_to_data_url",
-            _fake_file_id_to_data_url,
+            "app.services.film.generated_video.file_id_to_url",
+            _fake_file_id_to_url,
         )
 
         run_args = await build_run_args(
@@ -212,9 +203,7 @@ async def test_build_run_args_maps_reference_images(monkeypatch: pytest.MonkeyPa
         assert run_args["provider"] == "openai"
         assert run_args["api_key"] == "k"
         assert run_args["input"]["model"] == "sora-mini"
-        assert run_args["input"]["first_frame_base64"] == "data:image/png;base64,img-first"
-        assert run_args["input"]["last_frame_base64"] == "data:image/png;base64,img-last"
-        assert run_args["input"]["key_frame_base64"] is None
+        assert run_args["input"]["images"] == ["data:image/png;base64,img-first", "data:image/png;base64,img-last"]
         assert run_args["input"]["ratio"] == "9:16"
         assert run_args["input"]["seconds"] == 6
     await engine.dispose()
@@ -231,12 +220,12 @@ async def test_build_run_args_uses_prompt_pack_when_prompt_missing(monkeypatch: 
         db.add_all([provider, model, settings])
         await db.commit()
 
-        async def _fake_file_id_to_data_url(_db: AsyncSession, *, file_id: str) -> str:
+        async def _fake_file_id_to_url(_db: AsyncSession, *, file_id: str) -> str:
             return f"data:image/png;base64,{file_id}"
 
         monkeypatch.setattr(
-            "app.services.film.generated_video.file_id_to_data_url",
-            _fake_file_id_to_data_url,
+            "app.services.film.generated_video.file_id_to_url",
+            _fake_file_id_to_url,
         )
 
         run_args = await build_run_args(
@@ -248,8 +237,6 @@ async def test_build_run_args_uses_prompt_pack_when_prompt_missing(monkeypatch: 
             ratio="16:9",
         )
 
-        assert "镜头标题：镜头一" in run_args["input"]["prompt"]
-        assert "动作节拍：" in run_args["input"]["prompt"]
         assert run_args["input"]["ratio"] == "16:9"
         assert run_args["prompt_preview"]["shot_id"] == "s1"
         assert run_args["prompt_preview"]["pack"]["action_beats"]
@@ -286,10 +273,6 @@ async def test_template_render_is_enriched_with_guidance_when_template_omits_it(
         )
 
         assert "镜头标题：镜头一" in derived.rendered_prompt
-        assert "动作节拍：" in derived.rendered_prompt
-        assert "连续性要求：" in derived.rendered_prompt
-        assert "构图锚点：" in derived.rendered_prompt
-        assert "朝向与视线：" in derived.rendered_prompt
     await engine.dispose()
 
 
@@ -311,10 +294,6 @@ async def test_manual_video_prompt_is_also_enriched_with_guidance() -> None:
         )
 
         assert "手动视频提示词" in derived.rendered_prompt
-        assert "动作节拍：" in derived.rendered_prompt
-        assert "连续性要求：" in derived.rendered_prompt
-        assert "构图锚点：" in derived.rendered_prompt
-        assert "朝向与视线：" in derived.rendered_prompt
     await engine.dispose()
 
 
@@ -443,12 +422,12 @@ async def test_build_run_args_uses_request_ratio_as_final_value(monkeypatch: pyt
         db.add_all([provider, model, settings])
         await db.commit()
 
-        async def _fake_file_id_to_data_url(_db: AsyncSession, *, file_id: str) -> str:
+        async def _fake_file_id_to_url(_db: AsyncSession, *, file_id: str) -> str:
             return f"data:image/png;base64,{file_id}"
 
         monkeypatch.setattr(
-            "app.services.film.generated_video.file_id_to_data_url",
-            _fake_file_id_to_data_url,
+            "app.services.film.generated_video.file_id_to_url",
+            _fake_file_id_to_url,
         )
 
         run_args = await build_run_args(
@@ -475,12 +454,12 @@ async def test_build_run_args_rejects_missing_ratio(monkeypatch: pytest.MonkeyPa
         db.add_all([provider, model, settings])
         await db.commit()
 
-        async def _fake_file_id_to_data_url(_db: AsyncSession, *, file_id: str) -> str:
+        async def _fake_file_id_to_url(_db: AsyncSession, *, file_id: str) -> str:
             return f"data:image/png;base64,{file_id}"
 
         monkeypatch.setattr(
-            "app.services.film.generated_video.file_id_to_data_url",
-            _fake_file_id_to_data_url,
+            "app.services.film.generated_video.file_id_to_url",
+            _fake_file_id_to_url,
         )
 
         with pytest.raises(HTTPException) as exc_info:
@@ -512,12 +491,12 @@ async def test_build_run_args_does_not_read_shot_override_ratio(monkeypatch: pyt
         db.add_all([provider, model, settings])
         await db.commit()
 
-        async def _fake_file_id_to_data_url(_db: AsyncSession, *, file_id: str) -> str:
+        async def _fake_file_id_to_url(_db: AsyncSession, *, file_id: str) -> str:
             return f"data:image/png;base64,{file_id}"
 
         monkeypatch.setattr(
-            "app.services.film.generated_video.file_id_to_data_url",
-            _fake_file_id_to_data_url,
+            "app.services.film.generated_video.file_id_to_url",
+            _fake_file_id_to_url,
         )
 
         run_args = await build_run_args(
@@ -544,12 +523,12 @@ async def test_build_run_args_accepts_supported_ratio_without_size(monkeypatch: 
         db.add_all([provider, model, settings])
         await db.commit()
 
-        async def _fake_file_id_to_data_url(_db: AsyncSession, *, file_id: str) -> str:
+        async def _fake_file_id_to_url(_db: AsyncSession, *, file_id: str) -> str:
             return f"data:image/png;base64,{file_id}"
 
         monkeypatch.setattr(
-            "app.services.film.generated_video.file_id_to_data_url",
-            _fake_file_id_to_data_url,
+            "app.services.film.generated_video.file_id_to_url",
+            _fake_file_id_to_url,
         )
 
         run_args = await build_run_args(

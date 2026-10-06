@@ -26,11 +26,11 @@ _SCRIPT_DIVIDER_SYSTEM_PROMPT = """\
 （无素材时跳过此段）
 
 【核心创意】
-[时长]秒，16:9横版。[主体(@图片N)]在[场景(@图片N)]中[做什么]。[风格]，[运镜方式]。
+[时长]秒，{aspect_ratio}画幅。[主体(@图片N)]在[场景(@图片N)]中[做什么]。[风格]，[运镜方式]。
 
 【画面过程描述】
 0-X秒：[景别]，[运镜]，[角色动作]，台词："[原文]"。音效：[环境音/动作音]。
-反向：不要[不想要的元素]。
+反向：不要[不想要的元素]。不要在画面中生成任何可读文字、字幕、Logo、水印。
 X-Y秒：[同上格式]
 ...
 不要额外添加背景音乐。（或指定需要的音乐）
@@ -75,10 +75,11 @@ class ScriptDividerAgent(AgentBase[ScriptDivisionResult]):
     """剧本自动分镜：输入完整剧本文本，输出分镜列表。"""
 
     enable_thinking: bool = False
+    aspect_ratio: str = "9:16"
 
     @property
     def system_prompt(self) -> str:
-        return _SCRIPT_DIVIDER_SYSTEM_PROMPT
+        return _SCRIPT_DIVIDER_SYSTEM_PROMPT.replace("{aspect_ratio}", self.aspect_ratio)
 
     @property
     def prompt_template(self) -> PromptTemplate:
@@ -125,10 +126,14 @@ class ScriptDividerAgent(AgentBase[ScriptDivisionResult]):
 
         return self.output_model.model_validate(data)  # type: ignore[arg-type]
 
-    def divide_script(self, *, script_text: str, asset_list: str = "") -> ScriptDivisionResult:
+    def divide_script(self, *, script_text: str, asset_list: str = "", aspect_ratio: str = "") -> ScriptDivisionResult:
+        if aspect_ratio:
+            self.aspect_ratio = aspect_ratio
         return self.extract(script_text=script_text, asset_list=asset_list)
 
-    async def adivide_script(self, *, script_text: str, asset_list: str = "") -> ScriptDivisionResult:
+    async def adivide_script(self, *, script_text: str, asset_list: str = "", aspect_ratio: str = "") -> ScriptDivisionResult:
+        if aspect_ratio:
+            self.aspect_ratio = aspect_ratio
         return await self.aextract(script_text=script_text, asset_list=asset_list)
 
     def _normalize(self, data: dict[str, Any]) -> dict[str, Any]:

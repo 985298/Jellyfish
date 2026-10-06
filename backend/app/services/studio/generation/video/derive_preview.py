@@ -10,7 +10,6 @@ from app.services.studio.shot_video_prompt_pack import (
     _render_template,
     _resolve_video_prompt_template,
     build_shot_video_prompt_pack,
-    enrich_rendered_video_prompt,
 )
 
 
@@ -35,10 +34,7 @@ async def derive_video_preview(
 ) -> VideoDerivedPreview:
     pack = await build_shot_video_prompt_pack(db, shot_id=base.shot_id)
     if base.prompt:
-        rendered_prompt = enrich_rendered_video_prompt(
-            rendered_prompt=base.prompt,
-            pack=pack,
-        )
+        rendered_prompt = base.prompt
         return VideoDerivedPreview(
             shot_id=base.shot_id,
             reference_mode=context.reference_mode,
@@ -56,15 +52,14 @@ async def derive_video_preview(
         warnings.append("未配置视频提示词模板，已使用系统默认拼装提示词")
         rendered_prompt = _fallback_video_prompt(pack)
     else:
-        rendered_prompt = _render_template(template.content, _pack_variables(pack))
-        if not rendered_prompt:
-            warnings.append("视频提示词模板渲染结果为空，已使用系统默认拼装提示词")
-            rendered_prompt = _fallback_video_prompt(pack)
-        else:
-            rendered_prompt = enrich_rendered_video_prompt(
-                rendered_prompt=rendered_prompt,
-                pack=pack,
-            )
+       rendered_prompt = _render_template(template.content, _pack_variables(pack))
+       if not rendered_prompt:
+           warnings.append("视频提示词模板渲染结果为空，已使用系统默认拼装提示词")
+           rendered_prompt = _fallback_video_prompt(pack)
+       else:
+            # 治本：模板 {{description}} 已含完整 Agnes 三段式（参考素材说明+核心创意+画面过程+反向），
+            # 官方格式：模板 {{description}} 已含完整三段式，不再追加任何约束后缀。
+            pass
 
     return VideoDerivedPreview(
         shot_id=base.shot_id,

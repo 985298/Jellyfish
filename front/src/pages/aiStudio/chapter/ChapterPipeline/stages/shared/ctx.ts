@@ -24,6 +24,8 @@ export type PipelineCtx = {
   projectId: string | undefined
   chapterId: string | undefined
   scriptText: string
+  /** 项目级默认视频比例（从 project.default_video_ratio 读取），视频阶段提交时用 */
+  projectRatio?: string
   setLoading: (v: boolean) => void
   updateStage: (key: StageKey, patch: StagePatch) => void
   resetStageForRun: (key: StageKey) => void

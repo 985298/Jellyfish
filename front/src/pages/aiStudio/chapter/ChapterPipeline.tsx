@@ -5,6 +5,9 @@ import { ThunderboltOutlined, CloseCircleOutlined } from '@ant-design/icons'
 import { StudioChaptersService } from '../../../services/generated'
 import { useParams, Link, useSearchParams } from 'react-router-dom'
 import { StageCard } from './ChapterPipeline/StageCard'
+import { VideoStagePanel } from './ChapterPipeline/stages/video/VideoStagePanel'
+import { KeyframeStagePanel } from './ChapterPipeline/stages/keyframe/KeyframeStagePanel'
+import { AssetImageStagePanel } from './ChapterPipeline/stages/asset-image/AssetImageStagePanel'
 import {
   usePipelineState,
   useTaskPolling,
@@ -92,6 +95,7 @@ export default function ChapterPipeline() {
   const [loading, setLoading] = useState(false)
   const [chapterTitle, setChapterTitle] = useState('')
   const [scriptText, setScriptText] = useState('')
+  const [projectRatio, setProjectRatio] = useState<string>('9:16')
   const [runningStage, setRunningStage] = useState<StageKey | null>(null)
   const taskIdRef = useRef<Partial<Record<StageKey, string | null>>>({})
   const stageTaskIdsRef = useRef<Partial<Record<StageKey, string[]>>>({})
@@ -133,10 +137,23 @@ export default function ChapterPipeline() {
     void loadStatus()
   }, [chapterId, loadStatus])
 
+  // P0: 拉项目级 default_video_ratio，供视频阶段 runner 提交时使用（不硬编码 9:16）
+  useEffect(() => {
+    if (!projectId) return
+    fetch(`/api/v1/studio/projects/${projectId}`)
+      .then((r) => r.json())
+      .then((d) => {
+        const ratio = d?.data?.default_video_ratio || d?.default_video_ratio
+        if (ratio) setProjectRatio(ratio)
+      })
+      .catch(() => {})
+  }, [projectId])
+
   const ctx = useMemo(() => ({
     projectId,
     chapterId,
     scriptText,
+    projectRatio,
     setLoading,
     updateStage,
     resetStageForRun,
@@ -150,7 +167,7 @@ export default function ChapterPipeline() {
     },
     // 一批任务共用一个定时器并发轮询，替代原来的「跑一项等一项」
     pollMany,
-  }), [projectId, chapterId, scriptText, updateStage, resetStageForRun, poll, pollMany])
+  }), [projectId, chapterId, scriptText, projectRatio, updateStage, resetStageForRun, poll, pollMany])
 
   const runners = useMemo(() => buildStageRunners(ctx), [ctx])
 
@@ -422,19 +439,48 @@ export default function ChapterPipeline() {
             }
 
             return (
-              <StageCard
-                key={stage.key}
-                stage={stage}
-                index={i}
-                canRun={canRun(stage.key)}
-                busy={busy}
-                externalLink={externalLink}
-                onRun={handleStageRun}
-                onStop={(k) => void stopStage(k)}
-                onRetryFailed={handleRetryFailed}
-                projectId={projectId}
-                chapterId={chapterId}
-              />
+              <div key={stage.key}>
+                <StageCard
+                  stage={stage}
+                  index={i}
+                  canRun={canRun(stage.key)}
+                  busy={busy}
+                  externalLink={externalLink}
+                  onRun={handleStageRun}
+                  onStop={(k) => void stopStage(k)}
+                  onRetryFailed={handleRetryFailed}
+                  projectId={projectId}
+                  chapterId={chapterId}
+                />
+                {stage.key === 'videos' ? (
+                  <VideoStagePanel
+                    chapterId={chapterId}
+                    stage={stage}
+                    busy={busy}
+                    projectRatio={projectRatio}
+                    onRegenerate={(onlyIds: string[]) => void runStage('videos', { onlyIds })}
+                    onStop={() => void stopStage('videos')}
+                  />
+                ) : null}
+                {stage.key === 'keyframes' ? (
+                  <KeyframeStagePanel
+                    chapterId={chapterId}
+                    stage={stage}
+                    busy={busy}
+                    onRegenerate={(onlyIds: string[]) => void runStage('keyframes', { onlyIds })}
+                    onStop={() => void stopStage('keyframes')}
+                  />
+                ) : null}
+                {stage.key === 'asset_images' ? (
+                  <AssetImageStagePanel
+                    projectId={projectId}
+                    stage={stage}
+                    busy={busy}
+                    onRegenerate={(onlyIds: string[]) => void runStage('asset_images', { onlyIds })}
+                    onStop={() => void stopStage('asset_images')}
+                  />
+                ) : null}
+              </div>
             )
           })}
         </div>
@@ -463,3 +509,4 @@ export default function ChapterPipeline() {
     </div>
   )
 }
+

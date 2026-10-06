@@ -65,12 +65,16 @@ class DivideResultGenerator(AbstractLLMResultGenerator):
         agent = ScriptDividerAgent(llm)
         project_id = str(run_args.get("project_id") or "")
         asset_list = ""
+        aspect_ratio = "9:16"
         if project_id:
             from app.core.db_sync import sync_session_maker
             from app.services.studio.script_division import build_asset_list_text_sync
             with sync_session_maker() as _db:
                 asset_list = build_asset_list_text_sync(_db, project_id)
-        return agent.divide_script(script_text=str(run_args.get("script_text") or ""), asset_list=asset_list)
+                _proj = _db.get(Project, project_id)
+                if _proj and getattr(_proj, "default_video_ratio", None):
+                    aspect_ratio = str(_proj.default_video_ratio)
+        return agent.divide_script(script_text=str(run_args.get("script_text") or ""), asset_list=asset_list, aspect_ratio=aspect_ratio)
 
 
 class ConsistencyResultGenerator(AbstractLLMResultGenerator):
@@ -426,10 +430,14 @@ def generate_division_result(
     llm = build_default_text_llm_sync(db, thinking=False)
     agent = ScriptDividerAgent(llm)
     asset_list = ""
+    aspect_ratio = "9:16"
     if project_id:
         from app.services.studio.script_division import build_asset_list_text_sync
         asset_list = build_asset_list_text_sync(db, project_id)
-    return agent.divide_script(script_text=script_text, asset_list=asset_list)
+        _proj2 = db.get(Project, project_id)
+        if _proj2 and getattr(_proj2, "default_video_ratio", None):
+            aspect_ratio = str(_proj2.default_video_ratio)
+    return agent.divide_script(script_text=script_text, asset_list=asset_list, aspect_ratio=aspect_ratio)
 
 
 def apply_division_result(

@@ -20,15 +20,13 @@ VideoRatio = Literal["16:9", "4:3", "1:1", "3:4", "9:16", "21:9"]
 
 
 class VideoGenerationInput(BaseModel):
-    """视频生成输入：支持文本提示词 + 可选的三种帧参考图（纯 base64 或 data URL）。"""
+    """视频生成输入：支持文本提示词 + 可选的三种帧参考图（公开可访问 URL 或 data URL）。"""
 
     model_config = ConfigDict(extra="forbid")
 
     prompt: Optional[str] = Field(None, description="文本提示词；可与参考图二选一或同时存在")
 
-    first_frame_base64: Optional[str] = Field(None, description="首帧图：纯 base64 或 data:image/...;base64,...")
-    last_frame_base64: Optional[str] = Field(None, description="尾帧图：纯 base64 或 data URL")
-    key_frame_base64: Optional[str] = Field(None, description="关键帧图：纯 base64 或 data URL")
+    images: list[str] = Field(default_factory=list, description="参考图 URL 列表（角色图，按 prompt @图片X 顺序，最多5张）")
 
     model: Optional[str] = Field(None, description="视频模型名称（可选，供应商透传）")
     ratio: VideoRatio = Field(..., description="视频宽高比，业务层唯一主参数")
@@ -44,13 +42,7 @@ class VideoGenerationInput(BaseModel):
     @model_validator(mode="after")
     def require_prompt_or_any_reference(self) -> "VideoGenerationInput":
         has_prompt = bool((self.prompt or "").strip())
-        has_ref = any(
-            [
-                _strip_optional_b64(self.first_frame_base64),
-                _strip_optional_b64(self.last_frame_base64),
-                _strip_optional_b64(self.key_frame_base64),
-            ]
-        )
+        has_ref = bool(self.images)
         if not has_prompt and not has_ref:
             raise ValueError("Require prompt or at least one reference frame (base64)")
         return self

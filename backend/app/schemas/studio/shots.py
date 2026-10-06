@@ -444,6 +444,7 @@ class ShotVideoPromptPackRead(BaseModel):
     """视频提示词渲染前的标准上下文包。"""
 
     shot_id: str = Field(..., description="镜头 ID")
+    description: str = Field("", description="镜头原始描述（Agnes 三段式：参考素材说明+核心创意+画面过程），作为视频提示词主输入")
     title: str = Field("", description="镜头标题")
     script_excerpt: str = Field("", description="剧本摘录")
     action_beats: list[str] = Field(default_factory=list, description="动作/场景要点")
