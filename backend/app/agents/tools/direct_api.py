@@ -8,6 +8,7 @@ Results are written back to DB (files table + shot_frame_images / shots).
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import uuid
 from pathlib import Path
@@ -16,6 +17,7 @@ import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core import storage
 from app.core.db import async_session_maker
 from app.models.llm import Model, ModelSettings, Provider
 from app.models.studio import FileItem, Shot, ShotFrameImage
@@ -209,16 +211,17 @@ async def direct_video_generate(api_key, base_url, model_name, prompt, image_url
 
 
 async def save_image_to_db(db, image_url, name, prefix):
-    """Download image, save to local storage, create FileItem. Returns file_id."""
+    """Download image, upload to object storage, create FileItem. Returns file_id."""
     async with httpx.AsyncClient(timeout=120) as client:
         resp = await client.get(image_url)
         resp.raise_for_status()
         image_data = resp.content
     file_id = str(uuid.uuid4())
-    storage_key = "%s/%s.png" % (prefix, file_id)
-    local_dir = BACKEND_DIR / "data" / prefix.replace("/", "_")
-    local_dir.mkdir(parents=True, exist_ok=True)
-    (local_dir / (file_id + ".png")).write_bytes(image_data)
+    # 内容派生 storage_key：重试覆盖同 S3 对象，不造孤儿（note 1）
+    content_hash = hashlib.sha256(image_data).hexdigest()[:24]
+    storage_key = "%s/%s.png" % (prefix, content_hash)
+    # upload-then-persist：对象上传成功才写行，无"行存在/对象未上传"窗口（条款 1）
+    await storage.upload_file(key=storage_key, data=image_data, content_type="image/png")
     file_item = FileItem(id=file_id, type="image", name=name, thumbnail="", tags="[]", storage_key=storage_key)
     db.add(file_item)
     await db.flush()
@@ -226,17 +229,18 @@ async def save_image_to_db(db, image_url, name, prefix):
 
 
 async def save_video_to_db(db, video_url, shot_id, api_key):
-    """Download video, save to local storage, create FileItem, update shot. Returns file_id."""
+    """Download video, upload to object storage, create FileItem, update shot. Returns file_id."""
     headers = {"Authorization": "Bearer %s" % api_key}
     async with httpx.AsyncClient(timeout=300) as client:
         resp = await client.get(video_url, headers=headers)
         resp.raise_for_status()
         video_data = resp.content
     file_id = str(uuid.uuid4())
-    storage_key = "generated-videos/shots/%s/%s.mp4" % (shot_id, file_id)
-    local_dir = BACKEND_DIR / "data" / "generated-videos" / "shots" / shot_id
-    local_dir.mkdir(parents=True, exist_ok=True)
-    (local_dir / (file_id + ".mp4")).write_bytes(video_data)
+    # 内容派生 storage_key：重试覆盖同 S3 对象（note 1）
+    content_hash = hashlib.sha256(video_data).hexdigest()[:24]
+    storage_key = "generated-videos/shots/%s/%s.mp4" % (shot_id, content_hash)
+    # upload-then-persist：对象上传成功才写行（条款 1）
+    await storage.upload_file(key=storage_key, data=video_data, content_type="video/mp4")
     file_item = FileItem(id=file_id, type="video", name="shot-%s-video" % shot_id, thumbnail="", tags="[]", storage_key=storage_key)
     db.add(file_item)
     shot = await db.get(Shot, shot_id)
@@ -263,7 +267,12 @@ async def get_char_ref_url(db, character_names, project_id):
         if img:
             file_item = await db.get(FileItem, img[0])
             if file_item and file_item.storage_key:
-                return file_item.storage_key
+                try:
+                    await storage.get_file_info(key=file_item.storage_key)
+                except FileNotFoundError:
+                    logger.warning("char ref object missing (corrupted): %s", file_item.storage_key)
+                    continue
+                return storage.presigned_url(key=file_item.storage_key)
     return None
 
 
@@ -279,7 +288,12 @@ async def get_keyframe_url(db, shot_id):
     if frame:
         file_item = await db.get(FileItem, frame[0])
         if file_item and file_item.storage_key:
-            return file_item.storage_key
+            try:
+                await storage.get_file_info(key=file_item.storage_key)
+            except FileNotFoundError:
+                logger.warning("keyframe object missing (corrupted): shot=%s", shot_id)
+                return None
+            return storage.presigned_url(key=file_item.storage_key)
     return None
 
 

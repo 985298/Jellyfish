@@ -322,7 +322,13 @@ async def get_file_info(*, key: str) -> StoredFileInfo:
     s3_key = _normalize_key(key)
 
     def _head() -> dict[str, Any]:
-        return client.head_object(Bucket=bucket, Key=s3_key)  # type: ignore[no-any-return]
+        try:
+            return client.head_object(Bucket=bucket, Key=s3_key)  # type: ignore[no-any-return]
+        except ClientError as exc:
+            code = exc.response.get("Error", {}).get("Code", "")
+            if code in ("404", "NoSuchKey"):
+                raise FileNotFoundError(f"S3 对象不存在: {key}")
+            raise
 
     meta = await to_thread.run_sync(_head)
 
