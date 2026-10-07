@@ -73,11 +73,24 @@ class GenerateFrameTool(Tool):
                 db.add(frame_row)
                 await db.flush()
 
-            # Route B: if image_url provided, use direct API img2img
-            if data.image_url:
+            # 自动查角色参考图（不靠模型自觉，design-doc Step 4 img2img；解 character_names + ref URL 两缺口，drift #8）
+            image_url = data.image_url
+            if not image_url:
+                from app.agents.tools.direct_api import get_char_ref_url
+                from app.models.studio import ShotCharacterLink, Character
+                _char_names = [r[0] for r in (await db.execute(
+                    select(Character.name)
+.join(ShotCharacterLink, ShotCharacterLink.character_id == Character.id)
+.where(ShotCharacterLink.shot_id == data.shot_id)
+.order_by(ShotCharacterLink.index)
+)).all()]
+                if _char_names:
+                    image_url = await get_char_ref_url(db, _char_names, ctx.project_id)
+            # Route B: if image_url (provided or auto-fetched), use direct API img2img
+            if image_url:
                 from app.agents.tools.direct_api import get_image_api_config, direct_image_generate, save_image_to_db
                 api_key, base_url, model_name = await get_image_api_config(db)
-                result_url = await direct_image_generate(api_key, base_url, model_name, prompt, image_url=data.image_url)
+                result_url = await direct_image_generate(api_key, base_url, model_name, prompt, image_url=image_url)
                 file_id = await save_image_to_db(db, result_url, "shot-%s-frame" % data.shot_id, "generated-images/frames")
                 frame_row.file_id = file_id
                 await db.commit()
