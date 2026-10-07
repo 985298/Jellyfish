@@ -51,6 +51,7 @@ async def list_asset_images_paginated(
     *,
     entity_type: str,
     entity_id: str | None,
+    project_id: str | None,
     order: str | None,
     is_desc: bool,
     page: int,
@@ -64,6 +65,12 @@ async def list_asset_images_paginated(
     """
     spec = entity_spec(entity_type)
     stmt = select(spec.image_model)
+    if project_id:
+        # 跨租户隔离：image 经 id_field join 父实体，按父 project_id 过滤（scene/prop/costume 父表均有 project_id）
+        image_fk = getattr(spec.image_model, spec.id_field)
+        stmt = stmt.join(spec.model, image_fk == spec.model.id).where(
+            getattr(spec.model, "project_id") == project_id
+        )
     if entity_id:
         id_field = getattr(spec.image_model, spec.id_field)
         stmt = stmt.where(id_field == entity_id)

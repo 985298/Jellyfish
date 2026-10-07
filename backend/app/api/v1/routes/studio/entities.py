@@ -50,6 +50,7 @@ async def check_entity_names_existence(
 async def list_scene_images(
     db: AsyncSession = Depends(get_db),
     entity_id: str | None = Query(None, description="按场景 ID 过滤；缺省返回全部场景图片"),
+    project_id: str | None = Query(None, description="按租户归属项目过滤；Gateway 必传以隔离跨租户数据"),
     order: str | None = Query(None),
     is_desc: bool = Query(False),
     page: int = Query(1, ge=1),
@@ -59,6 +60,7 @@ async def list_scene_images(
     payload, total = await service.list_asset_images(
         entity_type="scene",
         entity_id=entity_id,
+        project_id=project_id,
         order=order,
         is_desc=is_desc,
         page=page,
@@ -75,6 +77,7 @@ async def list_scene_images(
 async def list_prop_images(
     db: AsyncSession = Depends(get_db),
     entity_id: str | None = Query(None, description="按道具 ID 过滤；缺省返回全部道具图片"),
+    project_id: str | None = Query(None, description="按租户归属项目过滤；Gateway 必传以隔离跨租户数据"),
     order: str | None = Query(None),
     is_desc: bool = Query(False),
     page: int = Query(1, ge=1),
@@ -84,6 +87,7 @@ async def list_prop_images(
     payload, total = await service.list_asset_images(
         entity_type="prop",
         entity_id=entity_id,
+        project_id=project_id,
         order=order,
         is_desc=is_desc,
         page=page,
@@ -100,6 +104,7 @@ async def list_prop_images(
 async def list_costume_images(
     db: AsyncSession = Depends(get_db),
     entity_id: str | None = Query(None, description="按服装 ID 过滤；缺省返回全部服装图片"),
+    project_id: str | None = Query(None, description="按租户归属项目过滤；Gateway 必传以隔离跨租户数据"),
     order: str | None = Query(None),
     is_desc: bool = Query(False),
     page: int = Query(1, ge=1),
@@ -109,6 +114,7 @@ async def list_costume_images(
     payload, total = await service.list_asset_images(
         entity_type="costume",
         entity_id=entity_id,
+        project_id=project_id,
         order=order,
         is_desc=is_desc,
         page=page,
