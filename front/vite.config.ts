@@ -1,9 +1,21 @@
 import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
+import { readFileSync } from 'fs'
+import { resolve } from 'path'
+
+function readEnvToken(): string {
+  try {
+    const content = readFileSync(resolve(process.cwd(), '.env'), 'utf-8')
+    const match = content.match(/^JELLYFISH_INTERNAL_TOKEN=(.+)$/m)
+    return match?.[1]?.trim() || 'dev-internal-token'
+  } catch {
+    return 'dev-internal-token'
+  }
+}
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
-  const internalToken = env.JELLYFISH_INTERNAL_TOKEN || 'dev-internal-token'
+  const internalToken = env.JELLYFISH_INTERNAL_TOKEN || readEnvToken()
 
   return {
     plugins: [react()],
