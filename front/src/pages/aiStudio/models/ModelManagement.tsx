@@ -178,13 +178,18 @@ export default function ModelManagement() {
 
   return (
     <div className="h-full flex flex-col">
+      <style>{`
+        .model-mgmt-tabs { height: 100%; display: flex; flex-direction: column; }
+        .model-mgmt-tabs > .ant-tabs-content-holder { flex: 1; min-height: 0; overflow: auto; }
+        .model-mgmt-tabs > .ant-tabs-content { height: 100%; }
+      `}</style>
       <div className="flex-shrink-0 px-4 py-3 border-b border-gray-200 bg-white">
         <span className="font-semibold text-gray-800">模型管理</span>
       </div>
       <div className="flex-1 min-h-0 overflow-hidden">
         <Tabs
           defaultActiveKey="models"
-          className="px-4 pt-2"
+          className="px-4 pt-2 model-mgmt-tabs"
           items={[
             {
               key: 'models',
