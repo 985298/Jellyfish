@@ -279,7 +279,7 @@ async def update_model_settings(
 ) -> ModelSettings:
     """更新模型全局设置。"""
     settings = await get_or_create_settings(db)
-    patch_model(settings, body.model_dump())
+    patch_model(settings, body.model_dump(exclude_unset=True))
     return await flush_and_refresh(db, settings)
 
 
