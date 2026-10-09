@@ -31,7 +31,7 @@ from app.services.llm.provider_registry import (
     register_provider,
     resolve_provider_key_from_name,
 )
-from app.services.llm.provider_resolver import (
+from app.services.llm.provider_config_resolver import (
     ResolvedProviderConfig,
     resolve_provider_config,
     resolve_provider_config_by_model,

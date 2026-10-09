@@ -75,3 +75,21 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+
+# 条款3: 启动断言 — 生产环境禁止使用默认 internal token（与 gateway 条款1 同模式）
+import warnings as _jf_warnings
+_JF_DEFAULT_TOKEN = "dev-internal-token"
+if not settings.debug:
+    if settings.jellyfish_internal_token == _JF_DEFAULT_TOKEN:
+        raise RuntimeError(
+            "jellyfish_internal_token using default value; "
+            "set strong random in .env (debug=False)"
+        )
+else:
+    if settings.jellyfish_internal_token == _JF_DEFAULT_TOKEN:
+        _jf_warnings.warn(
+            "jellyfish_internal_token using default value in dev; "
+            "set strong value before production.",
+            stacklevel=2,
+        )

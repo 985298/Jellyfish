@@ -22,6 +22,10 @@ logger = logging.getLogger(__name__)
 
 MEDIA_SERVICE_URL = os.environ.get("MEDIA_SERVICE_URL", "http://127.0.0.1:8001")
 MEDIA_SERVICE_DIR = os.environ.get("MEDIA_SERVICE_DIR", os.path.abspath(os.path.join(os.getcwd(), "..", "..", "media-service")))
+# 条款5: env化路径对齐 — dev=./output 行为不变, prod=/var/media/output 三者对齐
+MEDIA_OUTPUT_ROOT = os.environ.get("MEDIA_OUTPUT_ROOT", "./output")
+# 条款5: internal token for media-service auth
+MEDIA_INTERNAL_TOKEN = os.environ.get("MEDIA_INTERNAL_TOKEN", "dev-internal-token")
 
 
 def _s3_client():
@@ -50,12 +54,15 @@ def _resolve_media_path(relative_path: str) -> str:
     """Resolve a path returned by Media Service (relative to its CWD) to an absolute path."""
     if os.path.isabs(relative_path) and os.path.isfile(relative_path):
         return relative_path
-    candidate = os.path.join(MEDIA_SERVICE_DIR, relative_path)
+    candidate = os.path.join(MEDIA_OUTPUT_ROOT, relative_path)
     if os.path.isfile(candidate):
         return candidate
-    candidate2 = os.path.join(os.getcwd(), relative_path)
+    candidate2 = os.path.join(MEDIA_SERVICE_DIR, relative_path)
     if os.path.isfile(candidate2):
         return candidate2
+    candidate3 = os.path.join(os.getcwd(), relative_path)
+    if os.path.isfile(candidate3):
+        return candidate3
     return ""
 
 
@@ -100,11 +107,17 @@ async def render_chapter(
 
     logger.info("render chapter %s: %d shots, project=%s", chapter_id, len(dub_shots), chapter.project_id)
 
-    dub_request = {"episode_id": chapter_id, "shots": dub_shots, "output_dir": "./output/" + chapter_id}
+    # 条款5: env化 — 发送/写入/读回三者统一用 MEDIA_OUTPUT_ROOT
+    _output_dir = os.path.join(MEDIA_OUTPUT_ROOT, chapter_id)
+    dub_request = {"episode_id": chapter_id, "shots": dub_shots, "output_dir": _output_dir}
 
     try:
         async with httpx.AsyncClient(timeout=600.0) as client:
-            resp = await client.post(MEDIA_SERVICE_URL + "/internal/v1/media/dub", json=dub_request)
+            resp = await client.post(
+                MEDIA_SERVICE_URL + "/internal/v1/media/dub",
+                json=dub_request,
+                headers={"X-Internal-Token": MEDIA_INTERNAL_TOKEN},
+            )
             resp.raise_for_status()
             result = resp.json()
     except httpx.HTTPStatusError as exc:
@@ -120,7 +133,7 @@ async def render_chapter(
 
     # If no final concatenated file, try to find individual dubbed videos and concat them
     if not final_path:
-        output_dir = os.path.join(MEDIA_SERVICE_DIR, "output", chapter_id)
+        output_dir = os.path.join(MEDIA_OUTPUT_ROOT, chapter_id)
         dubbed_files = []
         for r in result.get("results", []):
             if r.get("status") == "SUCCEEDED" and r.get("output_path"):

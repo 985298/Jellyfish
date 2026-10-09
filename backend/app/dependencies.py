@@ -32,6 +32,7 @@ async def get_nothinking_llm(db: AsyncSession = Depends(get_db)) -> BaseChatMode
     return await build_default_text_llm(db, thinking=False)
 
 
+# Deprecated: bypasses resolver + contract layer. P3 阶段应路由到 core/integrations adapter.
 class _ImageHttpRunnable:
     """最小图片生成 runnable：从环境变量读取配置，通过 HTTP 调用外部图片生成服务。"""
 

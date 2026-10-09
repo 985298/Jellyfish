@@ -137,6 +137,9 @@ class ModelSettingsBase(BaseModel):
     default_text_model_id: str | None = Field(None, description="默认文本模型 ID")
     default_image_model_id: str | None = Field(None, description="默认图片模型 ID")
     default_video_model_id: str | None = Field(None, description="默认视频模型 ID")
+    default_image_to_video_model_id: str | None = Field(None, description="默认图生视频模型 ID")
+    default_super_resolution_model_id: str | None = Field(None, description="默认超分辨率模型 ID")
+    default_tts_model_id: str | None = Field(None, description="默认 TTS 模型 ID")
     api_timeout: int = Field(30, description="API 超时（秒）")
     log_level: LogLevel = Field(LogLevel.info, description="日志级别")
 
@@ -153,3 +156,36 @@ class ModelSettingsRead(ModelSettingsBase):
     model_config = ConfigDict(from_attributes=True)
 
     id: int = Field(..., description="设置行 ID（通常为 1）")
+
+
+class ProbeModelRead(BaseModel):
+    """probe 发现的单个模型。"""
+
+    id: str = Field(..., description="模型 ID（provider 返回）")
+    name: str | None = Field(None, description="展示名称")
+    raw: dict[str, Any] | None = Field(None, description="原始数据")
+
+
+class ProbeResult(BaseModel):
+    """probe 结果。"""
+
+    provider_id: str = Field(..., description="供应商 ID")
+    models: list[ProbeModelRead] = Field(default_factory=list, description="发现的模型列表")
+    raw_status: int | None = Field(None, description="provider 返回的 HTTP 状态码")
+
+
+class ProjectModelBindingCreate(BaseModel):
+    """创建/更新项目模型绑定。"""
+
+    model_id: str = Field(..., description="绑定的模型 ID")
+
+
+class ProjectModelBindingRead(BaseModel):
+    """项目模型绑定信息。"""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int = Field(..., description="绑定行 ID")
+    project_id: str = Field(..., description="项目 ID")
+    category: ModelCategoryKey = Field(..., description="模型类别")
+    model_id: str | None = Field(None, description="绑定的模型 ID")

@@ -50,3 +50,14 @@ backend/chaoge_full.py
 backend/_*.py
 backend/_*.txt
 backend/_*.json
+
+# Build artifacts
+*.tsbuildinfo
+front/test-results/
+front/vite.config.d.ts
+front/vite.config.js
+front/vite.config.js.timestamp-*
+
+# Database backups & runtime data
+*.db.bak
+backend/data/

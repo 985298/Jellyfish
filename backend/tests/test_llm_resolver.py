@@ -103,7 +103,6 @@ async def test_get_model_by_category_supports_explicit_id_without_default_fallba
             db,
             ModelCategoryKey.image,
             model_or_id="m_img",
-            allow_default_fallback=False,
         )
         assert resolved.id == "m_img"
 

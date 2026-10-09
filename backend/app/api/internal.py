@@ -398,6 +398,7 @@ class GenerationTaskCreateInternal(BaseModel):
     prompt: str | None = Field(None, description="视频提示词")
     images: list[str] = Field(default_factory=list, description="参考图 file_id 列表")
     ratio: str | None = Field(None, description="视频画幅比例")
+    model_id: str | None = Field(None, description="可选模型 ID（不传则走三级解析链）")
 
 
 @router.post(
@@ -453,6 +454,7 @@ async def create_generation_task_internal(
         run_args = await build_vg_run_args(
             db, shot_id=body.shot_id, reference_mode=body.reference_mode,
             prompt=body.prompt, images=body.images, ratio=body.ratio,
+            model_id=body.model_id, project_id=project_id,
         )
         task_kind = "video_generation"
         resource_type = "video"

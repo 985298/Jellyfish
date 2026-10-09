@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.utils import apply_keyword_filter, apply_order, paginate
-from app.models.llm import Model, ModelCategoryKey, ModelSettings, Provider
+from app.models.llm import Model, ModelCategoryKey, ModelSettings, ProjectModelBinding, Provider
 from app.core.integrations.image_capabilities import (
     DEFAULT_VIDEO_REFERENCE_RATIO_SIZE_MAP,
     resolve_image_capability,
@@ -381,3 +381,108 @@ def _ensure_provider_supports_category(*, provider: Provider, category: ModelCat
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Provider {provider.name!r} does not support category={normalized_category.value}",
         )
+
+
+# ---------- Probe ----------
+
+async def probe_provider_models(db: AsyncSession, *, provider_id: str):
+    """调 provider 的 GET /models 发现可用模型。10s 超时，不 retry。"""
+    import httpx
+    from app.schemas.llm import ProbeModelRead, ProbeResult
+
+    provider = await db.get(Provider, provider_id)
+    if provider is None:
+        raise HTTPException(status_code=404, detail=f"Provider not found: {provider_id}")
+
+    api_key = (provider.api_key or "").strip()
+    base_url = (provider.base_url or "").strip()
+    if not api_key:
+        raise HTTPException(status_code=403, detail="Provider api_key is empty")
+    if not base_url:
+        raise HTTPException(status_code=400, detail="Provider base_url is empty")
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(
+                base_url.rstrip("/") + "/models",
+                headers={"Authorization": f"Bearer {api_key}"},
+            )
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=504, detail="Provider 响应超时（10s）")
+    except httpx.ConnectError:
+        raise HTTPException(status_code=502, detail="无法连接到 Provider")
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Provider 调用失败: {e}")
+
+    if resp.status_code == 404:
+        return ProbeResult(provider_id=provider_id, models=[], raw_status=404)
+    if resp.status_code == 401:
+        raise HTTPException(status_code=403, detail="API key 无效")
+    if resp.status_code != 200:
+        raise HTTPException(status_code=502, detail=f"Provider 返回 HTTP {resp.status_code}")
+
+    try:
+        body = resp.json()
+        raw_models = body.get("data", []) if isinstance(body, dict) else (body if isinstance(body, list) else [])
+        models = [
+            ProbeModelRead(id=str(m.get("id", "")), name=m.get("id"), raw=m)
+            for m in raw_models
+            if m.get("id")
+        ]
+    except Exception:
+        models = []
+
+    return ProbeResult(provider_id=provider_id, models=models, raw_status=resp.status_code)
+
+
+# ---------- Project Model Bindings ----------
+
+async def list_project_bindings(db: AsyncSession, *, project_id: str) -> list:
+    result = await db.execute(
+        select(ProjectModelBinding).where(ProjectModelBinding.project_id == project_id)
+    )
+    return list(result.scalars().all())
+
+
+async def upsert_project_binding(
+    db: AsyncSession, *, project_id: str, category: ModelCategoryKey, model_id: str,
+):
+    model = await db.get(Model, model_id)
+    if model is None:
+        raise HTTPException(status_code=404, detail=f"Model not found: {model_id}")
+    if model.category != category:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Model category={model.category.value} does not match binding category={category.value}",
+        )
+
+    existing = (await db.execute(
+        select(ProjectModelBinding).where(
+            ProjectModelBinding.project_id == project_id,
+            ProjectModelBinding.category == category,
+        )
+    )).scalar_one_or_none()
+
+    if existing:
+        existing.model_id = model_id
+        await db.flush()
+        return existing
+
+    binding = ProjectModelBinding(project_id=project_id, category=category, model_id=model_id)
+    db.add(binding)
+    await db.flush()
+    return binding
+
+
+async def delete_project_binding(
+    db: AsyncSession, *, project_id: str, category: ModelCategoryKey,
+) -> None:
+    existing = (await db.execute(
+        select(ProjectModelBinding).where(
+            ProjectModelBinding.project_id == project_id,
+            ProjectModelBinding.category == category,
+        )
+    )).scalar_one_or_none()
+    if existing:
+        await db.delete(existing)
+        await db.flush()

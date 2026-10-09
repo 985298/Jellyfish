@@ -6,20 +6,30 @@ from fastapi import HTTPException, status
 from langchain_core.language_models.chat_models import BaseChatModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session
 
 from app.models.llm import Model, ModelCategoryKey, ModelSettings, Provider
 from app.services.common import entity_not_found
-from app.services.llm.provider_resolver import resolve_effective_base_url
+from app.services.llm.provider_config_resolver import resolve_effective_base_url
+
+
+_CATEGORY_TO_SETTINGS_FIELD = {
+    ModelCategoryKey.text: "default_text_model_id",
+    ModelCategoryKey.image: "default_image_model_id",
+    ModelCategoryKey.video: "default_video_model_id",
+    ModelCategoryKey.image_to_video: "default_image_to_video_model_id",
+    ModelCategoryKey.super_resolution: "default_super_resolution_model_id",
+    ModelCategoryKey.tts: "default_tts_model_id",
+}
 
 
 def _settings_model_id(settings_row: ModelSettings | None, category: ModelCategoryKey) -> str | None:
     if settings_row is None:
         return None
-    if category == ModelCategoryKey.text:
-        return settings_row.default_text_model_id
-    if category == ModelCategoryKey.image:
-        return settings_row.default_image_model_id
-    return settings_row.default_video_model_id
+    field_name = _CATEGORY_TO_SETTINGS_FIELD.get(category)
+    if not field_name:
+        return None
+    return getattr(settings_row, field_name, None)
 
 
 async def get_provider_by_id_or_obj(db: AsyncSession, provider_or_id: Provider | str) -> Provider:
@@ -32,9 +42,9 @@ async def get_model_by_category(
     category: ModelCategoryKey,
     *,
     model_or_id: Model | str | None = None,
-    allow_default_fallback: bool = True,
+    project_id: str | None = None,
 ) -> Model:
-    """按类别解析模型，可传入显式模型（或 id），也可从默认设置解析。"""
+    """按类别解析模型，三级：model_or_id > project_binding > global_default > 503。"""
     if model_or_id is not None:
         model = await _resolve_model(db, model_or_id)
         if model.category != category:
@@ -44,6 +54,19 @@ async def get_model_by_category(
             )
         return model
 
+    # 项目级绑定（binding.model_id 为 None 时跳过，走 global default）
+    if project_id is not None:
+        from app.models.llm import ProjectModelBinding
+        binding = (await db.execute(
+            select(ProjectModelBinding).where(
+                ProjectModelBinding.project_id == project_id,
+                ProjectModelBinding.category == category,
+            )
+        )).scalar_one_or_none()
+        if binding and binding.model_id:
+            return await get_model_by_category(db, category, model_or_id=binding.model_id)
+
+    # 全局默认
     settings_row = await db.get(ModelSettings, 1)
     settings_model_id = _settings_model_id(settings_row, category)
     if settings_model_id:
@@ -57,7 +80,6 @@ async def get_model_by_category(
                 ) from e
             raise
 
-    _ = allow_default_fallback  # 保留参数签名兼容，默认模型来源统一为 ModelSettings。
     raise HTTPException(
         status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
         detail=f"No default model configured for category={category.value}",
@@ -66,7 +88,7 @@ async def get_model_by_category(
 
 async def get_default_model_by_category(db: AsyncSession, category: ModelCategoryKey) -> Model:
     """按类别解析默认模型，仅从单例 ModelSettings 读取。"""
-    return await get_model_by_category(db, category, allow_default_fallback=True)
+    return await get_model_by_category(db, category)
 
 
 async def _resolve_model(db: AsyncSession, model_or_id: Model | str) -> Model:
@@ -138,9 +160,11 @@ async def build_default_text_llm(
     db: AsyncSession,
     *,
     thinking: bool,
+    model_id: str | None = None,
+    project_id: str | None = None,
 ) -> BaseChatModel:
     """基于默认文本模型构造 ChatOpenAI。"""
-    model = await get_default_model_by_category(db, ModelCategoryKey.text)
+    model = await get_model_by_category(db, ModelCategoryKey.text, model_or_id=model_id, project_id=project_id)
     provider = await get_provider_by_model_or_id(db, model)
     settings_row = await db.get(ModelSettings, 1)
     api_timeout = (settings_row.api_timeout if settings_row and settings_row.api_timeout else 30) or 30
@@ -193,3 +217,61 @@ def _build_chat_openai_model(
         kwargs["extra_body"] = extra_body
 
     return ChatOpenAI(**kwargs)
+
+
+def build_default_text_llm_sync(
+    db: Session,
+    *,
+    thinking: bool,
+    model_id: str | None = None,
+    project_id: str | None = None,
+) -> BaseChatModel:
+    """同步入口 — Celery worker 用。DB 查询保持同步，ChatOpenAI 构造共享 _build_chat_openai_model。"""
+    model: Model | None = None
+
+    # 1. 显式 model_id
+    if model_id:
+        model = db.get(Model, model_id)
+        if model is None:
+            raise HTTPException(status_code=404, detail=entity_not_found("Model"))
+        if model.category != ModelCategoryKey.text:
+            raise HTTPException(status_code=503, detail=f"Model category mismatch: {model.id} (category={model.category})")
+
+    # 2. 项目级绑定
+    if model is None and project_id:
+        from app.models.llm import ProjectModelBinding
+        binding = db.execute(
+            select(ProjectModelBinding).where(
+                ProjectModelBinding.project_id == project_id,
+                ProjectModelBinding.category == ModelCategoryKey.text,
+            )
+        ).scalar_one_or_none()
+        if binding and binding.model_id:
+            model = db.get(Model, binding.model_id)
+            if model and model.category != ModelCategoryKey.text:
+                raise HTTPException(status_code=503, detail=f"Model category mismatch: {model.id}")
+
+    # 3. 全局默认
+    if model is None:
+        settings_row = db.get(ModelSettings, 1)
+        sid = _settings_model_id(settings_row, ModelCategoryKey.text)
+        if sid:
+            model = db.get(Model, sid)
+
+    if model is None:
+        raise HTTPException(status_code=503, detail="No default text model configured")
+
+    provider = db.get(Provider, model.provider_id)
+    if provider is None:
+        raise HTTPException(status_code=503, detail=f"Provider not found for model_id={model.id}")
+
+    settings_row = db.get(ModelSettings, 1)
+    api_timeout = (settings_row.api_timeout if settings_row and settings_row.api_timeout else 30) or 30
+
+    return _build_chat_openai_model(
+        provider=provider,
+        model=model,
+        thinking=thinking,
+        timeout=api_timeout,
+        import_error_detail="Install langchain-openai to use script-processing tasks",
+    )

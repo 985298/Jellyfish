@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies import get_db
+from app.api.internal import verify_internal_token
 from app.schemas.common import ApiResponse, PaginatedData, created_response, empty_response, paginated_response, success_response
 from app.schemas.studio.entity_existence import (
     EntityNameExistenceCheckRequest,
@@ -15,7 +16,7 @@ from app.schemas.studio.entity_existence import (
 )
 from app.services.studio import StudioEntitiesService
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(verify_internal_token)])
 
 
 @router.post(
@@ -50,7 +51,7 @@ async def check_entity_names_existence(
 async def list_scene_images(
     db: AsyncSession = Depends(get_db),
     entity_id: str | None = Query(None, description="按场景 ID 过滤；缺省返回全部场景图片"),
-    project_id: str | None = Query(None, description="按租户归属项目过滤；Gateway 必传以隔离跨租户数据"),
+    project_id: str = Query(..., description="按租户归属项目过滤；Gateway 必传以隔离跨租户数据"),
     order: str | None = Query(None),
     is_desc: bool = Query(False),
     page: int = Query(1, ge=1),
@@ -77,7 +78,7 @@ async def list_scene_images(
 async def list_prop_images(
     db: AsyncSession = Depends(get_db),
     entity_id: str | None = Query(None, description="按道具 ID 过滤；缺省返回全部道具图片"),
-    project_id: str | None = Query(None, description="按租户归属项目过滤；Gateway 必传以隔离跨租户数据"),
+    project_id: str = Query(..., description="按租户归属项目过滤；Gateway 必传以隔离跨租户数据"),
     order: str | None = Query(None),
     is_desc: bool = Query(False),
     page: int = Query(1, ge=1),
@@ -104,7 +105,7 @@ async def list_prop_images(
 async def list_costume_images(
     db: AsyncSession = Depends(get_db),
     entity_id: str | None = Query(None, description="按服装 ID 过滤；缺省返回全部服装图片"),
-    project_id: str | None = Query(None, description="按租户归属项目过滤；Gateway 必传以隔离跨租户数据"),
+    project_id: str = Query(..., description="按租户归属项目过滤；Gateway 必传以隔离跨租户数据"),
     order: str | None = Query(None),
     is_desc: bool = Query(False),
     page: int = Query(1, ge=1),
@@ -211,6 +212,7 @@ async def get_entity_usage(
 async def list_entity_images(
     entity_type: str,
     entity_id: str,
+    project_id: str = Query(...),
     db: AsyncSession = Depends(get_db),
     order: str | None = Query(None),
     is_desc: bool = Query(False),
@@ -221,6 +223,7 @@ async def list_entity_images(
     payload, total = await service.list_entity_images(
         entity_type=entity_type,
         entity_id=entity_id,
+        project_id=project_id,
         order=order,
         is_desc=is_desc,
         page=page,

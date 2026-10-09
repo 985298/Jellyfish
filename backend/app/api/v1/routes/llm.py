@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies import get_db
+from app.api.internal import verify_internal_token
 from app.models.llm import ModelCategoryKey
 from app.schemas.common import ApiResponse, PaginatedData, created_response, empty_response, success_response
 from app.schemas.llm import (
@@ -15,6 +16,9 @@ from app.schemas.llm import (
     ModelSettingsRead,
     ModelSettingsUpdate,
     ModelUpdate,
+    ProbeResult,
+    ProjectModelBindingCreate,
+    ProjectModelBindingRead,
     ProviderCreate,
     ProviderRead,
     ProviderSupportedRead,
@@ -22,6 +26,10 @@ from app.schemas.llm import (
     ProviderUpdate,
 )
 from app.services.llm.manage import (
+    probe_provider_models as probe_provider_models_service,
+    list_project_bindings as list_project_bindings_service,
+    upsert_project_binding as upsert_project_binding_service,
+    delete_project_binding as delete_project_binding_service,
     create_model as create_model_service,
     create_provider as create_provider_service,
     delete_model as delete_model_service,
@@ -278,3 +286,67 @@ async def update_model_settings(
 ) -> ApiResponse[ModelSettingsRead]:
     settings = await update_model_settings_service(db, body=body)
     return success_response(ModelSettingsRead.model_validate(settings))
+
+
+# ---------- Probe ----------
+
+@router.post(
+    "/providers/{provider_id}/probe",
+    response_model=ApiResponse[ProbeResult],
+    summary="探测 Provider 可用模型（调 GET /models）",
+)
+async def probe_provider(
+    provider_id: str,
+    db: AsyncSession = Depends(get_db),
+    _: None = Depends(verify_internal_token),
+) -> ApiResponse[ProbeResult]:
+    result = await probe_provider_models_service(db, provider_id=provider_id)
+    return success_response(result)
+
+
+# ---------- Project Model Bindings ----------
+
+@router.get(
+    "/projects/{project_id}/model-bindings",
+    response_model=ApiResponse[list[ProjectModelBindingRead]],
+    summary="列出项目模型绑定",
+)
+async def list_model_bindings(
+    project_id: str,
+    db: AsyncSession = Depends(get_db),
+) -> ApiResponse[list[ProjectModelBindingRead]]:
+    bindings = await list_project_bindings_service(db, project_id=project_id)
+    return success_response([ProjectModelBindingRead.model_validate(b) for b in bindings])
+
+
+@router.put(
+    "/projects/{project_id}/model-bindings/{category}",
+    response_model=ApiResponse[ProjectModelBindingRead],
+    summary="设置/覆盖项目模型绑定（upsert + category 校验）",
+)
+async def upsert_model_binding(
+    project_id: str,
+    category: ModelCategoryKey,
+    body: ProjectModelBindingCreate,
+    db: AsyncSession = Depends(get_db),
+) -> ApiResponse[ProjectModelBindingRead]:
+    binding = await upsert_project_binding_service(
+        db, project_id=project_id, category=category, model_id=body.model_id,
+    )
+    await db.commit()
+    return success_response(ProjectModelBindingRead.model_validate(binding))
+
+
+@router.delete(
+    "/projects/{project_id}/model-bindings/{category}",
+    response_model=ApiResponse[None],
+    summary="删除项目模型绑定（恢复全局默认）",
+)
+async def delete_model_binding(
+    project_id: str,
+    category: ModelCategoryKey,
+    db: AsyncSession = Depends(get_db),
+) -> ApiResponse[None]:
+    await delete_project_binding_service(db, project_id=project_id, category=category)
+    await db.commit()
+    return empty_response()

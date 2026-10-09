@@ -40,6 +40,9 @@ class ModelCategoryKey(str, Enum):
     text = "text"
     image = "image"
     video = "video"
+    image_to_video = "image_to_video"
+    super_resolution = "super_resolution"
+    tts = "tts"
 
 
 class LogLevel(str, Enum):
@@ -105,7 +108,7 @@ class Model(Base, TimestampMixin):
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True, comment="模型 ID")
     name: Mapped[str] = mapped_column(String(255), nullable=False, index=True, comment="模型名称")
-    category: Mapped[ModelCategoryKey] = mapped_column(String(16), nullable=False, index=True, comment="模型类别")
+    category: Mapped[ModelCategoryKey] = mapped_column(String(32), nullable=False, index=True, comment="模型类别")
     provider_id: Mapped[str] = mapped_column(
         String(64),
         ForeignKey("providers.id", ondelete="CASCADE"),
@@ -153,10 +156,51 @@ class ModelSettings(Base):
         nullable=True,
         comment="默认视频模型 ID",
     )
+    default_image_to_video_model_id: Mapped[str | None] = mapped_column(
+        String(64),
+        ForeignKey("models.id", ondelete="SET NULL"),
+        nullable=True,
+        comment="默认图生视频模型 ID",
+    )
+    default_super_resolution_model_id: Mapped[str | None] = mapped_column(
+        String(64),
+        ForeignKey("models.id", ondelete="SET NULL"),
+        nullable=True,
+        comment="默认超分辨率模型 ID",
+    )
+    default_tts_model_id: Mapped[str | None] = mapped_column(
+        String(64),
+        ForeignKey("models.id", ondelete="SET NULL"),
+        nullable=True,
+        comment="默认 TTS 模型 ID",
+    )
     api_timeout: Mapped[int] = mapped_column(Integer, nullable=False, default=30, comment="API 超时（秒）")
     log_level: Mapped[LogLevel] = mapped_column(String(16), nullable=False, default=LogLevel.info, comment="日志级别")
 
     default_text_model: Mapped["Model | None"] = relationship(foreign_keys=[default_text_model_id])
     default_image_model: Mapped["Model | None"] = relationship(foreign_keys=[default_image_model_id])
     default_video_model: Mapped["Model | None"] = relationship(foreign_keys=[default_video_model_id])
+    default_image_to_video_model: Mapped["Model | None"] = relationship(foreign_keys=[default_image_to_video_model_id])
+    default_super_resolution_model: Mapped["Model | None"] = relationship(foreign_keys=[default_super_resolution_model_id])
+    default_tts_model: Mapped["Model | None"] = relationship(foreign_keys=[default_tts_model_id])
 
+
+class ProjectModelBinding(Base, TimestampMixin):
+    """项目级模型绑定：覆盖全局默认模型。"""
+
+    __tablename__ = "project_model_bindings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    project_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True,
+        comment="项目 ID",
+    )
+    category: Mapped[ModelCategoryKey] = mapped_column(String(32), nullable=False, comment="模型类别")
+    model_id: Mapped[str | None] = mapped_column(
+        String(64), ForeignKey("models.id", ondelete="SET NULL"), nullable=True,
+        comment="绑定的模型 ID",
+    )
+
+    __table_args__ = (
+        Index("ux_project_category", "project_id", "category", unique=True),
+    )

@@ -16,13 +16,13 @@ from app.core.task_manager.types import TaskStatus
 from app.core.contracts.provider import ProviderConfig
 from app.core.contracts.video_generation import VideoGenerationInput, VideoGenerationResult
 from app.core.tasks import VideoGenerationTask
-from app.models.llm import Model, ModelCategoryKey, ModelSettings
+from app.models.llm import Model, ModelCategoryKey
 from app.models.task_links import GenerationTaskLink
 from app.models.studio_asset_images import CharacterImage
 from app.models.studio import FileItem, Shot, ShotDetail, ShotFrameType
 from app.models.types import FileUsageKind
 from app.services.common import entity_not_found
-from app.services.llm.provider_resolver import resolve_provider_config_by_model
+from app.services.llm.provider_config_resolver import resolve_provider_config_by_model
 from app.services.studio.file_usages import sync_usage_from_shot_context
 from app.services.studio.generation.video import (
     REQUIRED_FRAMES_BY_MODE,
@@ -141,23 +141,18 @@ async def preview_prompt_and_images(
     return submission.prompt, submission.images, None
 
 
-async def resolve_default_video_model(db: AsyncSession) -> Model:
-    settings_row = await db.get(ModelSettings, 1)
-    model_id = settings_row.default_video_model_id if settings_row else None
-    if not model_id:
-        raise HTTPException(
-            status_code=503,
-            detail="No default video model configured; please set ModelSettings.default_video_model_id first",
-        )
-    model = await db.get(Model, model_id)
-    if model is None:
-        raise HTTPException(status_code=503, detail=f"Configured default video model not found: {model_id}")
-    if model.category != ModelCategoryKey.video:
-        raise HTTPException(
-            status_code=503,
-            detail=f"Configured default video model is not video category: {model_id} (category={model.category})",
-        )
-    return model
+async def resolve_default_video_model(db: AsyncSession, *, model_id: str | None = None, project_id: str | None = None) -> Model:
+    """解析视频模型 — 三级链：model_id > project_binding > global_default。"""
+    from app.services.llm.resolver import get_model_by_category
+    try:
+        return await get_model_by_category(db, ModelCategoryKey.video, model_or_id=model_id, project_id=project_id)
+    except HTTPException as e:
+        if e.status_code == 503:
+            raise HTTPException(
+                status_code=503,
+                detail=f"视频模型解析失败：{e.detail}。请前往模型管理设置默认视频模型。",
+            ) from e
+        raise
 
 
 async def load_provider_config_by_model(db: AsyncSession, model: Model) -> ProviderConfig:
@@ -232,8 +227,10 @@ async def build_run_args(
     prompt: str | None,
     images: list[str],
     ratio: str | None,
+    model_id: str | None = None,
+    project_id: str | None = None,
 ) -> dict:
-    model = await resolve_default_video_model(db)
+    model = await resolve_default_video_model(db, model_id=model_id, project_id=project_id)
     provider_cfg = await load_provider_config_by_model(db, model)
     shot_detail = await validate_shot_and_duration(db, shot_id)
     resolved_ratio = await resolve_effective_video_options(requested_ratio=ratio)

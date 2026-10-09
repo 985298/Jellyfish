@@ -15,7 +15,7 @@ from app.core.contracts.provider import ProviderConfig
 from app.models.llm import Model, ModelCategoryKey
 from app.models.studio import AssetViewAngle, FileItem, PromptCategory, PromptTemplate, ShotFrameType
 from app.services.llm import get_model_by_category
-from app.services.llm.provider_resolver import resolve_provider_config
+from app.services.llm.provider_config_resolver import resolve_provider_config
 
 
 # ---------------------------------------------------------------------------
@@ -106,14 +106,14 @@ def render_character_combined_prompt(description: str, **extra_variables: object
     )
 
 
-async def resolve_image_model(db: AsyncSession, model_id: str | None) -> Model:
-    """根据显式 model_id 或默认图片模型解析 Model。"""
+async def resolve_image_model(db: AsyncSession, model_id: str | None, project_id: str | None = None) -> Model:
+    """根据显式 model_id 或项目绑定或默认图片模型解析 Model。"""
     try:
         return await get_model_by_category(
             db,
             ModelCategoryKey.image,
             model_or_id=model_id,
-            allow_default_fallback=False,
+            project_id=project_id,
         )
     except HTTPException as e:
         if e.status_code == status.HTTP_404_NOT_FOUND and model_id:

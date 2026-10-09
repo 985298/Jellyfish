@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import storage
 from app.core.db import async_session_maker
-from app.models.llm import Model, ModelSettings, Provider
+from app.models.llm import Model, ModelCategoryKey, Provider
 from app.models.studio import FileItem, Shot, ShotFrameImage
 
 logger = logging.getLogger(__name__)
@@ -27,34 +27,22 @@ logger = logging.getLogger(__name__)
 BACKEND_DIR = Path(__file__).resolve().parent.parent.parent.parent
 
 
-async def get_image_api_config(db: AsyncSession) -> tuple[str, str, str]:
-    """Return (api_key, base_url, model_name) for the default image model."""
-    settings = await db.get(ModelSettings, 1)
-    model_id = settings.default_image_model_id if settings else None
-    if not model_id:
-        raise RuntimeError("No default image model configured")
-    model = await db.get(Model, model_id)
-    if model is None:
-        raise RuntimeError("Image model not found: %s" % model_id)
-    provider = await db.get(Provider, model.provider_id)
-    if provider is None:
-        raise RuntimeError("Provider not found for model: %s" % model_id)
-    return provider.api_key, provider.base_url, model.name
+async def get_image_api_config(db: AsyncSession, *, model_id: str | None = None, project_id: str | None = None) -> tuple[str, str, str]:
+    """Return (api_key, base_url, model_name) for the image model."""
+    from app.services.llm.resolver import get_model_by_category
+    from app.services.llm.provider_config_resolver import resolve_provider_config_by_model
+    model = await get_model_by_category(db, ModelCategoryKey.image, model_or_id=model_id, project_id=project_id)
+    config = await resolve_provider_config_by_model(db, model=model)
+    return config.api_key, config.base_url or "", model.name
 
 
-async def get_video_api_config(db: AsyncSession) -> tuple[str, str, str]:
-    """Return (api_key, base_url, model_name) for the default video model."""
-    settings = await db.get(ModelSettings, 1)
-    model_id = settings.default_video_model_id if settings else None
-    if not model_id:
-        raise RuntimeError("No default video model configured")
-    model = await db.get(Model, model_id)
-    if model is None:
-        raise RuntimeError("Video model not found: %s" % model_id)
-    provider = await db.get(Provider, model.provider_id)
-    if provider is None:
-        raise RuntimeError("Provider not found for model: %s" % model_id)
-    return provider.api_key, provider.base_url, model.name
+async def get_video_api_config(db: AsyncSession, *, model_id: str | None = None, project_id: str | None = None) -> tuple[str, str, str]:
+    """Return (api_key, base_url, model_name) for the video model."""
+    from app.services.llm.resolver import get_model_by_category
+    from app.services.llm.provider_config_resolver import resolve_provider_config_by_model
+    model = await get_model_by_category(db, ModelCategoryKey.video, model_or_id=model_id, project_id=project_id)
+    config = await resolve_provider_config_by_model(db, model=model)
+    return config.api_key, config.base_url or "", model.name
 
 
 class _NonRetryableError(Exception):

@@ -24,6 +24,22 @@ def client() -> TestClient:
     return TestClient(app)
 
 
+@pytest.fixture(autouse=True)
+def _bypass_internal_token():
+    """条款3: bypass verify_internal_token for logic tests.
+
+    Auth is tested separately in test_internal_token_auth.py.
+    Existing entity logic tests don't send X-Internal-Token and would 403.
+    """
+    if app is not None:
+        from app.api.internal import verify_internal_token
+        app.dependency_overrides[verify_internal_token] = lambda: None
+    yield
+    if app is not None:
+        from app.api.internal import verify_internal_token
+        app.dependency_overrides.pop(verify_internal_token, None)
+
+
 def pytest_configure(config: pytest.Config) -> None:
     """为轻量测试环境补齐 asyncio marker。"""
     config.addinivalue_line("markers", "asyncio: mark test as asyncio coroutine")

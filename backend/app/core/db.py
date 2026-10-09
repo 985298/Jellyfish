@@ -65,15 +65,37 @@ class Base(DeclarativeBase):
 
 
 async def init_db() -> None:
-    """创建所有表（开发/迁移用）。"""
+    """创建所有表 + 迁移既有表列（create_all 不改既有表结构）。"""
     # 确保 ORM 模型已导入，从而注册到 Base.metadata
     import app.models.llm  # noqa: F401  # pylint: disable=unused-import
     import app.models.studio  # noqa: F401
     import app.models.task  # noqa: F401
     import app.models.task_links  # noqa: F401
 
+    from sqlalchemy import text as _sa_text
+
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        # 迁移：给既有表加新列（SQLite 不支持 ADD COLUMN IF NOT EXISTS，需先检查）
+        # 仅 SQLite 需要 PRAGMA；PostgreSQL 用 information_schema
+        _new_settings_cols = [
+            ("default_image_to_video_model_id", "VARCHAR(64)"),
+            ("default_super_resolution_model_id", "VARCHAR(64)"),
+            ("default_tts_model_id", "VARCHAR(64)"),
+        ]
+        try:
+            _result = await conn.execute(_sa_text("PRAGMA table_info(model_settings)"))
+            _existing = {row[1] for row in _result.fetchall()}
+        except Exception:
+            _existing = set()
+        for _col, _typ in _new_settings_cols:
+            if _col not in _existing:
+                try:
+                    await conn.execute(_sa_text(
+                        f"ALTER TABLE model_settings ADD COLUMN {_col} {_typ}"
+                    ))
+                except Exception:
+                    pass  # 列已存在或表不存在（首次启动时 create_all 已建好）
 
 
 async def close_db() -> None:

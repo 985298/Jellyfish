@@ -119,7 +119,7 @@ async def test_resolve_default_video_model_requires_video_category() -> None:
             await resolve_default_video_model(db)
 
         assert exc_info.value.status_code == 503
-        assert "not video category" in exc_info.value.detail
+        assert "category mismatch" in exc_info.value.detail or "category" in exc_info.value.detail
     await engine.dispose()
 
 

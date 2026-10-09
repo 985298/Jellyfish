@@ -1,4 +1,4 @@
-import axios, { AxiosInstance, AxiosRequestConfig, AxiosResponse } from 'axios'
+﻿import axios, { AxiosInstance, AxiosRequestConfig, AxiosResponse } from 'axios'
 
 const backendBaseUrl = import.meta.env.VITE_BACKEND_URL ?? 'http://localhost:9123'
 const baseURL = import.meta.env.VITE_API_BASE_URL ?? `${backendBaseUrl}/api`
@@ -7,14 +7,7 @@ const http: AxiosInstance = axios.create({
   baseURL,
   timeout: 10000,
 })
-
-http.interceptors.request.use(
-  (config) => {
-    // 这里可以注入 token 等信息
-    return config
-  },
-  (error) => Promise.reject(error),
-)
+// Token 由 vite proxy 注入，客户端不持有密钥
 
 http.interceptors.response.use(
   (response: AxiosResponse) => {
@@ -25,7 +18,6 @@ http.interceptors.response.use(
     return body
   },
   (error) => {
-    // 这里可以统一处理错误提示、跳转登录等
     return Promise.reject(error)
   },
 )

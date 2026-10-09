@@ -3,6 +3,6 @@
 /* tslint:disable */
 /* eslint-disable */
 /**
- * 模型类别：文本/图片/视频。
+ * 模型类别。
  */
-export type ModelCategoryKey = 'text' | 'image' | 'video';
+export type ModelCategoryKey = 'text' | 'image' | 'video' | 'image_to_video' | 'super_resolution' | 'tts';
